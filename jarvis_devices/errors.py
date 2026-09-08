@@ -158,3 +158,18 @@ class ErrorCode:
     ANDROID_CONNECTION_FAILED = "android_connection_failed"
     ANDROID_CONNECTION_TIMEOUT = "android_connection_timeout"
     ANDROID_CAPABILITY_UNAVAILABLE = "android_capability_unavailable"
+    #: Phase 6 - a paired device that is not connected cannot be acted on. Kept
+    #: distinct from ANDROID_CONNECTION_FAILED so "never connected" is not
+    #: confused with "tried to connect and could not".
+    ANDROID_DEVICE_NOT_CONNECTED = "android_device_not_connected"
+    # Phase 6 - Android system control
+    ANDROID_SYSTEM_UNAVAILABLE = "android_system_unavailable"
+    ANDROID_SYSTEM_UNSUPPORTED = "android_system_unsupported"
+    ANDROID_SYSTEM_PERMISSION_DENIED = "android_system_permission_denied"
+    ANDROID_SYSTEM_INVALID_ARGUMENT = "android_system_invalid_argument"
+    ANDROID_SYSTEM_TIMEOUT = "android_system_timeout"
+    ANDROID_SYSTEM_FAILED = "android_system_failed"
+    ANDROID_VOLUME_UNAVAILABLE = "android_volume_unavailable"
+    ANDROID_BRIGHTNESS_UNAVAILABLE = "android_brightness_unavailable"
+    ANDROID_WIFI_UNAVAILABLE = "android_wifi_unavailable"
+    ANDROID_BLUETOOTH_UNAVAILABLE = "android_bluetooth_unavailable"

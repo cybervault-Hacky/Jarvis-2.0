@@ -462,18 +462,31 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
         bridge, phone, _, _ = await started_pair()
         await complete_pairing(bridge, phone)
         report = bridge.capabilities(phone.device_id)
-        self.assertEqual(report["supported"], list(SUPPORTED_CAPABILITIES))
+        # "supported" is the intersection of what the phone advertised and what
+        # this JARVIS understands - never the whole understood set.
+        self.assertEqual(report["supported"], list(phone.capabilities))
         self.assertEqual(report["advertised_not_supported"], [])
+        self.assertEqual(report["bridge_understands"], list(SUPPORTED_CAPABILITIES))
 
-    async def test_a_future_capability_is_never_reported_as_available(self) -> None:
-        bridge, phone, _, _ = await started_pair(capabilities=("bridge.protocol", "system.volume"))
+    async def test_an_unimplemented_capability_is_never_reported_as_available(self) -> None:
+        """``system.power`` is still a later phase; advertising it changes nothing."""
+        bridge, phone, _, _ = await started_pair(capabilities=("bridge.protocol", "system.power"))
         await complete_pairing(bridge, phone)
         report = bridge.capabilities(phone.device_id)
         self.assertEqual(report["supported"], ["bridge.protocol"])
-        self.assertEqual(report["advertised_not_supported"], ["system.volume"])
-        self.assertNotIn("system.volume", report["supported"])
+        self.assertEqual(report["advertised_not_supported"], ["system.power"])
+        self.assertNotIn("system.power", report["supported"])
         with self.assertRaises(AndroidCapabilityUnavailableError):
-            bridge.require_capability(phone.device_id, "system.volume")
+            bridge.require_capability(phone.device_id, "system.power")
+
+    async def test_an_unadvertised_system_capability_is_refused(self) -> None:
+        """A phone that never advertised a Phase 6 capability cannot be driven."""
+        bridge, phone, _, _ = await started_pair(capabilities=("bridge.protocol",))
+        await complete_pairing(bridge, phone)
+        for capability in ("system.volume", "system.brightness", "system.wifi", "system.bluetooth"):
+            with self.subTest(capability=capability):
+                with self.assertRaises(AndroidCapabilityUnavailableError):
+                    bridge.require_capability(phone.device_id, capability)
 
     async def test_an_unadvertised_capability_is_refused(self) -> None:
         bridge, phone, _, _ = await started_pair(capabilities=("bridge.protocol",))
@@ -495,7 +508,9 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         await bridge.pump()
-        self.assertEqual(bridge.capabilities(phone.device_id)["supported"], list(SUPPORTED_CAPABILITIES))
+        report = bridge.capabilities(phone.device_id)
+        self.assertEqual(report["supported"], ["bridge.protocol", "device.status"])
+        self.assertEqual(report["advertised_not_supported"], [])
 
     async def test_junk_capabilities_are_ignored(self) -> None:
         bridge, phone, _, _ = await started_pair()
@@ -751,12 +766,12 @@ class StatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private_key", text)
 
     async def test_device_status_includes_health_and_capability_split(self) -> None:
-        bridge, phone, _, _ = await started_pair(capabilities=("bridge.protocol", "system.volume"))
+        bridge, phone, _, _ = await started_pair(capabilities=("bridge.protocol", "system.power"))
         await complete_pairing(bridge, phone)
         payload = bridge.device_status(phone.device_id)
         self.assertEqual(payload["health"], HealthState.DISCONNECTED.value)
         self.assertEqual(payload["capabilities_understood"], ["bridge.protocol"])
-        self.assertEqual(payload["capabilities_advertised_not_supported"], ["system.volume"])
+        self.assertEqual(payload["capabilities_advertised_not_supported"], ["system.power"])
 
     async def test_an_unknown_device_status_is_refused(self) -> None:
         bridge, _, _, _ = await started_pair()

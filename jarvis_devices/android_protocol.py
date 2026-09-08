@@ -60,6 +60,18 @@ __all__ = [
     "PRE_PAIRING_TYPES",
     "AUTHENTICATED_TYPES",
     "RESPONSE_FOR",
+    "SYSTEM_CONTROL_REQUESTS",
+    "ALL_CAPABILITIES",
+    "CAPABILITY_BRIDGE_PROTOCOL",
+    "CAPABILITY_DEVICE_STATUS",
+    "CAPABILITY_SYSTEM_VOLUME",
+    "CAPABILITY_SYSTEM_BRIGHTNESS",
+    "CAPABILITY_SYSTEM_WIFI",
+    "CAPABILITY_SYSTEM_BLUETOOTH",
+    "SYSTEM_CONTROL_RESPONSES",
+    "validate_percent",
+    "PERCENT_MIN",
+    "PERCENT_MAX",
     "AndroidProtocolError",
     "InvalidMessageError",
     "UnknownMessageTypeError",
@@ -115,6 +127,31 @@ class MessageType(str, Enum):
     ACK = "ack"
     ERROR = "error"
 
+    # Phase 6 - Android system control. Every operation has its own explicit
+    # request/response pair. There is deliberately no generic "command",
+    # "execute", "run", "shell" or "adb" type: a capability that is not in this
+    # enum cannot be expressed on the wire at all.
+    SYSTEM_STATUS = "system_status"
+    SYSTEM_STATUS_RESPONSE = "system_status_response"
+    VOLUME_GET = "volume_get"
+    VOLUME_GET_RESPONSE = "volume_get_response"
+    VOLUME_SET = "volume_set"
+    VOLUME_SET_RESPONSE = "volume_set_response"
+    MUTE_SET = "mute_set"
+    MUTE_SET_RESPONSE = "mute_set_response"
+    BRIGHTNESS_GET = "brightness_get"
+    BRIGHTNESS_GET_RESPONSE = "brightness_get_response"
+    BRIGHTNESS_SET = "brightness_set"
+    BRIGHTNESS_SET_RESPONSE = "brightness_set_response"
+    WIFI_STATUS = "wifi_status"
+    WIFI_STATUS_RESPONSE = "wifi_status_response"
+    WIFI_SET = "wifi_set"
+    WIFI_SET_RESPONSE = "wifi_set_response"
+    BLUETOOTH_STATUS = "bluetooth_status"
+    BLUETOOTH_STATUS_RESPONSE = "bluetooth_status_response"
+    BLUETOOTH_SET = "bluetooth_set"
+    BLUETOOTH_SET_RESPONSE = "bluetooth_set_response"
+
 
 #: Explicit allowlist - the only values accepted on the wire.
 MESSAGE_TYPES: FrozenSet[str] = frozenset(member.value for member in MessageType)
@@ -143,7 +180,40 @@ RESPONSE_FOR: Dict[str, str] = {
     MessageType.HEARTBEAT.value: MessageType.HEARTBEAT_ACK.value,
     MessageType.CAPABILITIES.value: MessageType.ACK.value,
     MessageType.DEVICE_INFO.value: MessageType.ACK.value,
+    # Phase 6 - each system-control request has exactly one response type.
+    MessageType.SYSTEM_STATUS.value: MessageType.SYSTEM_STATUS_RESPONSE.value,
+    MessageType.VOLUME_GET.value: MessageType.VOLUME_GET_RESPONSE.value,
+    MessageType.VOLUME_SET.value: MessageType.VOLUME_SET_RESPONSE.value,
+    MessageType.MUTE_SET.value: MessageType.MUTE_SET_RESPONSE.value,
+    MessageType.BRIGHTNESS_GET.value: MessageType.BRIGHTNESS_GET_RESPONSE.value,
+    MessageType.BRIGHTNESS_SET.value: MessageType.BRIGHTNESS_SET_RESPONSE.value,
+    MessageType.WIFI_STATUS.value: MessageType.WIFI_STATUS_RESPONSE.value,
+    MessageType.WIFI_SET.value: MessageType.WIFI_SET_RESPONSE.value,
+    MessageType.BLUETOOTH_STATUS.value: MessageType.BLUETOOTH_STATUS_RESPONSE.value,
+    MessageType.BLUETOOTH_SET.value: MessageType.BLUETOOTH_SET_RESPONSE.value,
 }
+
+#: Phase 6 system-control requests (JARVIS -> phone). Everything outside this
+#: set and the Phase 5 handshake is not a system operation.
+SYSTEM_CONTROL_REQUESTS: FrozenSet[str] = frozenset(
+    {
+        MessageType.SYSTEM_STATUS.value,
+        MessageType.VOLUME_GET.value,
+        MessageType.VOLUME_SET.value,
+        MessageType.MUTE_SET.value,
+        MessageType.BRIGHTNESS_GET.value,
+        MessageType.BRIGHTNESS_SET.value,
+        MessageType.WIFI_STATUS.value,
+        MessageType.WIFI_SET.value,
+        MessageType.BLUETOOTH_STATUS.value,
+        MessageType.BLUETOOTH_SET.value,
+    }
+)
+
+#: Their responses (phone -> JARVIS).
+SYSTEM_CONTROL_RESPONSES: FrozenSet[str] = frozenset(
+    RESPONSE_FOR[name] for name in SYSTEM_CONTROL_REQUESTS
+)
 
 
 class AndroidProtocolError(Exception):
@@ -172,6 +242,50 @@ class MessageAuthenticationError(AndroidProtocolError):
 
 class ReplayDetectedError(AndroidProtocolError):
     """The frame repeats a nonce, sequence or session already accepted."""
+
+
+# --- Capability names -------------------------------------------------------
+# These travel inside ``capabilities`` frames, so they are protocol vocabulary.
+# They live here rather than in the bridge or the system module so neither has
+# to import the other.
+CAPABILITY_BRIDGE_PROTOCOL = "bridge.protocol"
+CAPABILITY_DEVICE_STATUS = "device.status"
+CAPABILITY_SYSTEM_VOLUME = "system.volume"
+CAPABILITY_SYSTEM_BRIGHTNESS = "system.brightness"
+CAPABILITY_SYSTEM_WIFI = "system.wifi"
+CAPABILITY_SYSTEM_BLUETOOTH = "system.bluetooth"
+
+#: Everything this JARVIS build actually understands. A phone may advertise more
+#: (``system.power``, ``comms.call``, ...); those are reported as advertised but
+#: never treated as available.
+ALL_CAPABILITIES: Tuple[str, ...] = (
+    CAPABILITY_BRIDGE_PROTOCOL,
+    CAPABILITY_DEVICE_STATUS,
+    CAPABILITY_SYSTEM_VOLUME,
+    CAPABILITY_SYSTEM_BRIGHTNESS,
+    CAPABILITY_SYSTEM_WIFI,
+    CAPABILITY_SYSTEM_BLUETOOTH,
+)
+
+#: Bounded representation for volume and brightness: an integer percentage.
+PERCENT_MIN = 0
+PERCENT_MAX = 100
+
+
+def validate_percent(value: Any, *, field: str = "level") -> int:
+    """Return ``value`` as a 0-100 integer, or raise :class:`InvalidMessageError`.
+
+    ``bool`` is rejected explicitly (it is an ``int`` subclass in Python), and so
+    are floats, strings and anything else - a percentage is an integer or it is
+    not a percentage.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidMessageError(f"{field} must be an integer, got {type(value).__name__}.")
+    if value < PERCENT_MIN or value > PERCENT_MAX:
+        raise InvalidMessageError(
+            f"{field} must be between {PERCENT_MIN} and {PERCENT_MAX}, got {value}."
+        )
+    return value
 
 
 def new_session_id() -> str:

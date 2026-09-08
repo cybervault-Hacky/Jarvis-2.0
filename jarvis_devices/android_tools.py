@@ -154,11 +154,21 @@ class AndroidBridgeTool(BaseDeviceTool):
         """Turn a bridge error into a structured result. No internals leak."""
         code = str(getattr(exc, "error_code", ErrorCode.ANDROID_BRIDGE_UNAVAILABLE))
         message = self._public_message(exc)
-        status = ToolResult.unavailable if code in (
+        if code in (
             ErrorCode.ANDROID_BRIDGE_UNAVAILABLE,
             ErrorCode.ANDROID_CAPABILITY_UNAVAILABLE,
-        ) else ToolResult.failure
-        return status(
+        ):
+            # ToolResult.unavailable() takes no ``error`` keyword. Passing one
+            # raised TypeError, which the framework boundary then reported as a
+            # generic tool_error and lost the structured code entirely.
+            return ToolResult.unavailable(
+                message,
+                error_code=code,
+                tool_name=self.name,
+                execution_id=context.execution_id,
+                data={"reason": type(exc).__name__},
+            )
+        return ToolResult.failure(
             message,
             error=f"{type(exc).__name__}"[:80],
             error_code=code,

@@ -59,7 +59,10 @@ from .android_identity import (
     validate_display_name,
 )
 from .android_protocol import (
+    ALL_CAPABILITIES,
     AUTHENTICATED_TYPES,
+    CAPABILITY_BRIDGE_PROTOCOL,
+    CAPABILITY_DEVICE_STATUS,
     RESPONSE_FOR,
     AndroidProtocolError,
     BridgeMessage,
@@ -96,6 +99,7 @@ __all__ = [
     "AndroidAuthenticationError",
     "AndroidConnectionError",
     "AndroidConnectionTimeoutError",
+    "AndroidDeviceNotConnectedError",
     "AndroidCapabilityUnavailableError",
     "PairingStatus",
     "PendingPairing",
@@ -112,15 +116,14 @@ __all__ = [
     "MAX_CONNECTION_ATTEMPTS_LIMIT",
 ]
 
-#: The only capabilities Phase 5 can honestly claim to understand.
-BRIDGE_PROTOCOL_CAPABILITY = "bridge.protocol"
-DEVICE_STATUS_CAPABILITY = "device.status"
-#: Capabilities a device may advertise during Phase 5 pairing. Anything else is
-#: recorded as "advertised, not supported" - never as available.
-SUPPORTED_CAPABILITIES: Tuple[str, ...] = (
-    BRIDGE_PROTOCOL_CAPABILITY,
-    DEVICE_STATUS_CAPABILITY,
-)
+#: Phase 5 capability names, kept as aliases so earlier imports keep working.
+BRIDGE_PROTOCOL_CAPABILITY = CAPABILITY_BRIDGE_PROTOCOL
+DEVICE_STATUS_CAPABILITY = CAPABILITY_DEVICE_STATUS
+#: Capabilities this JARVIS build understands. Phase 5 added the two bridge
+#: capabilities; Phase 6 added the four Android system capabilities. Anything a
+#: phone advertises beyond this is recorded as "advertised, not supported" -
+#: never as available.
+SUPPORTED_CAPABILITIES: Tuple[str, ...] = ALL_CAPABILITIES
 
 DEFAULT_PAIRING_TTL_SECONDS = 120
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
@@ -197,6 +200,16 @@ class AndroidConnectionError(AndroidBridgeError):
 
 class AndroidConnectionTimeoutError(AndroidConnectionError):
     error_code = ErrorCode.ANDROID_CONNECTION_TIMEOUT
+
+
+class AndroidDeviceNotConnectedError(AndroidConnectionError):
+    """The device is paired but has no live connection right now.
+
+    Raised *before* anything is sent, so a caller never waits out a timeout
+    wondering whether the phone might have acted.
+    """
+
+    error_code = ErrorCode.ANDROID_DEVICE_NOT_CONNECTED
 
 
 class AndroidCapabilityUnavailableError(AndroidBridgeError):
@@ -745,8 +758,30 @@ class AndroidDeviceBridge:
         Returns the response frame, or ``None`` when nothing answered in time.
         The correlation checks live in :meth:`_resolve_pending`: a response from
         another device, of another type, or a duplicate, is never accepted.
+
+        The device must already be **connected**; otherwise
+        :class:`AndroidDeviceNotConnectedError` is raised before anything is
+        sent. (The connection handshake itself uses the internal
+        :meth:`_request`, which is the only caller allowed to skip that check -
+        a device is by definition not yet connected while connecting.)
         """
-        device = self._require_privileged(device_id)
+        device = self.require_connected(device_id)
+        return await self._request(
+            device, message_type, payload, expect=expect, timeout=timeout, session_id=session_id
+        )
+
+    async def _request(
+        self,
+        device: AndroidDeviceIdentity,
+        message_type: MessageType,
+        payload: Optional[Mapping[str, Any]] = None,
+        *,
+        expect: Optional[MessageType] = None,
+        timeout: Optional[float] = None,
+        session_id: Optional[str] = None,
+    ) -> Optional[BridgeMessage]:
+        """Send one signed request and correlate its response. No trust gate."""
+        device_id = device.device_id
         expected = (expect or MessageType(RESPONSE_FOR.get(message_type.value, ""))) if expect else None
         request_id = crypto.new_request_id()
         effective_session = session_id if session_id is not None else self._session_ids.get(device_id, "")
@@ -875,8 +910,8 @@ class AndroidDeviceBridge:
             try:
                 if not self.transport.is_open:
                     await self.transport.open()
-                response = await self.send_request(
-                    device_id,
+                response = await self._request(
+                    device,
                     MessageType.CONNECT,
                     {"protocol_version": PROTOCOL_VERSION},
                     expect=MessageType.ACK,
@@ -932,9 +967,11 @@ class AndroidDeviceBridge:
             self._set_connection(device, ConnectionState.DISCONNECTED, last_error="revoked")
             return {"device_id": device_id, "state": ConnectionState.DISCONNECTED.value}
         try:
-            await self.send_request(device_id, MessageType.DISCONNECT, {}, expect=MessageType.ACK)
+            await self._request(device, MessageType.DISCONNECT, {}, expect=MessageType.ACK)
         except AndroidBridgeError:
             pass  # A device that is already gone still ends up DISCONNECTED.
+        except AndroidTransportError:
+            pass  # So does one whose transport vanished mid-call.
         self._session_ids.pop(device_id, None)
         self.replay_guard.forget_device(device_id)
         self._set_connection(device, ConnectionState.DISCONNECTED, last_error="")
@@ -1099,6 +1136,21 @@ class AndroidDeviceBridge:
             raise AndroidDeviceRevokedError(f"Device {device.display_name} has been revoked.")
         if not device.privileged:
             raise AndroidDeviceNotPairedError(f"Device {device.display_name} is not paired.")
+        return device
+
+    def require_connected(self, device_id: str) -> AndroidDeviceIdentity:
+        """Trusted *and* currently connected, or raise a structured error.
+
+        Sending to a disconnected device would burn the whole request timeout
+        and then answer ``None``, which reads as "maybe it happened". Refusing
+        up front is both faster and unambiguous.
+        """
+        device = self._require_privileged(device_id)
+        if device.connection.state is not ConnectionState.CONNECTED:
+            raise AndroidDeviceNotConnectedError(
+                f"Device {device.display_name} is not connected "
+                f"(state: {device.connection.state.value})."
+            )
         return device
 
     def _set_connection(

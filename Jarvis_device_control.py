@@ -60,6 +60,8 @@ from jarvis_devices.diagnostics import FrameworkDiagnosticsTool
 from jarvis_devices.permissions import (
     PERMISSION_ANDROID_BRIDGE_MANAGE,
     PERMISSION_ANDROID_BRIDGE_PAIR,
+    PERMISSION_ANDROID_SYSTEM_CONTROL,
+    PERMISSION_ANDROID_SYSTEM_READ,
     PERMISSION_APP_CONTROL,
     PERMISSION_DISPLAY_CONTROL,
     PERMISSION_NETWORK_CONTROL,
@@ -91,6 +93,10 @@ from jarvis_devices.android_bridge import (
 from jarvis_devices.android_tools import (
     ANDROID_BRIDGE_TOOL_NAMES,
     build_android_bridge_tools,
+)
+from jarvis_devices.android_system_tools import (
+    ANDROID_SYSTEM_TOOL_NAMES,
+    build_android_system_tools,
 )
 
 logger = logging.getLogger(__name__)
@@ -185,6 +191,35 @@ __all__ = [
     "android_device_pair",
     "android_device_unpair",
     "android_device_revoke",
+    # Phase 6 - Android system control
+    "android_system",
+    "android_system_tools",
+    "run_android_system_status",
+    "run_android_get_volume",
+    "run_android_set_volume",
+    "run_android_mute",
+    "run_android_unmute",
+    "run_android_get_brightness",
+    "run_android_set_brightness",
+    "run_android_wifi_status",
+    "run_android_wifi_enable",
+    "run_android_wifi_disable",
+    "run_android_bluetooth_status",
+    "run_android_bluetooth_enable",
+    "run_android_bluetooth_disable",
+    "android_system_status",
+    "android_get_volume",
+    "android_set_volume",
+    "android_mute",
+    "android_unmute",
+    "android_get_brightness",
+    "android_set_brightness",
+    "android_wifi_status",
+    "android_wifi_enable",
+    "android_wifi_disable",
+    "android_bluetooth_status",
+    "android_bluetooth_enable",
+    "android_bluetooth_disable",
 ]
 
 # ---------------------------------------------------------------------------
@@ -218,6 +253,7 @@ def framework_summary() -> Dict[str, Any]:
         "system_capabilities": _system_capabilities(),
         "power_capabilities": _power_capabilities(),
         "android_bridge": _android_bridge_summary(),
+        "android_system_capabilities": _android_system_capabilities(),
         "available_tools": [tool.name for tool in device_registry.list_tools(available_only=True)],
         "granted_permission_count": len(device_permissions.granted_permissions),
         "platforms": device_platforms.describe(),
@@ -394,6 +430,39 @@ def android_bridge_summary() -> Dict[str, Any]:
 
 #: Internal alias used by ``framework_summary`` (defined above this block).
 _android_bridge_summary = android_bridge_summary
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 - Android system control (status, volume, mute, brightness, radios)
+#
+# Everything here goes through the Phase 5 AndroidDeviceBridge: signed frames,
+# request/response correlation, sequence numbers, nonces, session binding and
+# replay protection. No tool opens a socket, runs ADB, spawns a process or
+# accepts a command, a destination or an Android API name.
+#
+# Confirmation follows the existing policy instead of a blanket rule: reading
+# state needs none, volume/brightness are LOW_RISK, and switching a radio is
+# EXTERNAL_ACTION so the policy asks first - the same split the PC's own Wi-Fi
+# and Bluetooth tools use. No tool takes a confirm flag, so nothing the model
+# generates can switch confirmation off.
+# ---------------------------------------------------------------------------
+android_system_tools = build_android_system_tools(android_bridge)
+#: The orchestrator all thirteen tools share (one bridge, one timeout policy).
+android_system = android_system_tools[0].control
+for _android_system_tool in android_system_tools:
+    device_registry.register(_android_system_tool)
+
+# Explicit opt-in. Revoke either permission and the matching tools answer
+# PERMISSION_DENIED without the bridge ever being contacted:
+#   device_permissions.revoke(PERMISSION_ANDROID_SYSTEM_CONTROL)
+device_permissions.grant(PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL)
+
+
+def _android_system_capabilities() -> Dict[str, str]:
+    """Which Android system capabilities this JARVIS build understands."""
+    from jarvis_devices.android_system import SYSTEM_CONTROL_CAPABILITIES
+
+    return {capability: "understood" for capability in SYSTEM_CONTROL_CAPABILITIES}
 
 
 # ---------------------------------------------------------------------------
@@ -972,3 +1041,232 @@ async def android_device_revoke(device: str) -> str:
         device: The registered device id from ``android_device_list``.
     """
     return await run_android_device_revoke(device)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 tools - Android system control
+#
+# Thirteen tools. The only arguments any of them accept are a registered device
+# id and, for the two setters, an integer percentage from 0 to 100. No
+# destination, command, shell, ADB invocation, Android API name, SSID, password,
+# file path or volume stream can be supplied.
+# ---------------------------------------------------------------------------
+async def run_android_system_status(device: str) -> str:
+    """Report an Android device's system state."""
+    return await _request("android.system.status", {"device": device})
+
+
+async def run_android_get_volume(device: str) -> str:
+    """Report an Android device's volume and mute state."""
+    return await _request("android.system.get_volume", {"device": device})
+
+
+async def run_android_set_volume(device: str, level: int) -> str:
+    """Set an Android device's media volume (0-100)."""
+    return await _request("android.system.set_volume", {"device": device, "level": level})
+
+
+async def run_android_mute(device: str) -> str:
+    """Mute an Android device."""
+    return await _request("android.system.mute", {"device": device})
+
+
+async def run_android_unmute(device: str) -> str:
+    """Unmute an Android device."""
+    return await _request("android.system.unmute", {"device": device})
+
+
+async def run_android_get_brightness(device: str) -> str:
+    """Report an Android device's screen brightness."""
+    return await _request("android.system.get_brightness", {"device": device})
+
+
+async def run_android_set_brightness(device: str, level: int) -> str:
+    """Set an Android device's screen brightness (0-100)."""
+    return await _request("android.system.set_brightness", {"device": device, "level": level})
+
+
+async def run_android_wifi_status(device: str) -> str:
+    """Report an Android device's Wi-Fi radio state."""
+    return await _request("android.system.wifi.status", {"device": device})
+
+
+async def run_android_wifi_enable(device: str) -> str:
+    """Turn an Android device's Wi-Fi radio on (requires confirmation)."""
+    return await _request("android.system.wifi.enable", {"device": device})
+
+
+async def run_android_wifi_disable(device: str) -> str:
+    """Turn an Android device's Wi-Fi radio off (requires confirmation)."""
+    return await _request("android.system.wifi.disable", {"device": device})
+
+
+async def run_android_bluetooth_status(device: str) -> str:
+    """Report an Android device's Bluetooth radio state."""
+    return await _request("android.system.bluetooth.status", {"device": device})
+
+
+async def run_android_bluetooth_enable(device: str) -> str:
+    """Turn an Android device's Bluetooth radio on (requires confirmation)."""
+    return await _request("android.system.bluetooth.enable", {"device": device})
+
+
+async def run_android_bluetooth_disable(device: str) -> str:
+    """Turn an Android device's Bluetooth radio off (requires confirmation)."""
+    return await _request("android.system.bluetooth.disable", {"device": device})
+
+
+@function_tool
+async def android_system_status(device: str) -> str:
+    """Report an Android device's system state.
+
+    Returns volume, mute, brightness, Wi-Fi and Bluetooth - but only the parts
+    that device actually supports. Nothing is invented for a device that did not
+    report it. Read only; changes nothing.
+
+    Args:
+        device: The registered device id (``adev-`` followed by 32 hex
+            characters) from ``android_device_list``. IP addresses, hostnames
+            and nicknames are not accepted.
+    """
+    return await run_android_system_status(device)
+
+
+@function_tool
+async def android_get_volume(device: str) -> str:
+    """Report an Android device's media volume and whether it is muted.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_get_volume(device)
+
+
+@function_tool
+async def android_set_volume(device: str, level: int) -> str:
+    """Set an Android device's media volume to an exact percentage.
+
+    This sets an absolute level rather than stepping up or down, so asking twice
+    for the same level is safe.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+        level: An integer from 0 (silent) to 100 (maximum).
+    """
+    return await run_android_set_volume(device, level)
+
+
+@function_tool
+async def android_mute(device: str) -> str:
+    """Mute an Android device. It always ends up muted - this is not a toggle.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_mute(device)
+
+
+@function_tool
+async def android_unmute(device: str) -> str:
+    """Unmute an Android device. It always ends up unmuted - this is not a toggle.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_unmute(device)
+
+
+@function_tool
+async def android_get_brightness(device: str) -> str:
+    """Report an Android device's screen brightness and whether it is adaptive.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_get_brightness(device)
+
+
+@function_tool
+async def android_set_brightness(device: str, level: int) -> str:
+    """Set an Android device's screen brightness to an exact percentage.
+
+    This does not turn adaptive brightness off. If the phone is in adaptive mode
+    the result says so, because Android may then adjust the value itself.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+        level: An integer from 0 (dim) to 100 (maximum).
+    """
+    return await run_android_set_brightness(device, level)
+
+
+@function_tool
+async def android_wifi_status(device: str) -> str:
+    """Report whether an Android device's Wi-Fi radio is on or off. Read only.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_wifi_status(device)
+
+
+@function_tool
+async def android_wifi_enable(device: str) -> str:
+    """Turn an Android device's Wi-Fi radio on.
+
+    Radio state only: this does not scan for networks, join a network or handle
+    passwords. Always asks for confirmation first.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_wifi_enable(device)
+
+
+@function_tool
+async def android_wifi_disable(device: str) -> str:
+    """Turn an Android device's Wi-Fi radio off.
+
+    This drops the phone's internet connection, so it always asks for
+    confirmation first.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_wifi_disable(device)
+
+
+@function_tool
+async def android_bluetooth_status(device: str) -> str:
+    """Report whether an Android device's Bluetooth radio is on or off. Read only.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_bluetooth_status(device)
+
+
+@function_tool
+async def android_bluetooth_enable(device: str) -> str:
+    """Turn an Android device's Bluetooth radio on.
+
+    Radio state only: this does not discover or pair with other devices. Always
+    asks for confirmation first.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_bluetooth_enable(device)
+
+
+@function_tool
+async def android_bluetooth_disable(device: str) -> str:
+    """Turn an Android device's Bluetooth radio off.
+
+    This disconnects any Bluetooth headset or watch, so it always asks for
+    confirmation first.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_bluetooth_disable(device)

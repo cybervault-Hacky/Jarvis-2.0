@@ -90,9 +90,11 @@ def make_signed(
 class MessageTypeAllowlistTests(unittest.TestCase):
     """These run without the signature library: the allowlist is data."""
 
-    def test_the_allowlist_is_explicit_and_small(self) -> None:
+    def test_the_allowlist_is_explicit_and_bounded(self) -> None:
         self.assertEqual(MESSAGE_TYPES, frozenset(member.value for member in MessageType))
-        self.assertLessEqual(len(MESSAGE_TYPES), 20)
+        # 13 Phase 5 frames + 20 Phase 6 request/response frames. The bound
+        # exists so the set stays enumerable and reviewable.
+        self.assertLessEqual(len(MESSAGE_TYPES), 40)
 
     def test_no_command_shaped_message_type_exists(self) -> None:
         for name in MESSAGE_TYPES:

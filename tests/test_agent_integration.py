@@ -77,6 +77,20 @@ NEW_TOOLS = [
     "android_device_pair",
     "android_device_unpair",
     "android_device_revoke",
+    # Phase 6 - Android system control
+    "android_system_status",
+    "android_get_volume",
+    "android_set_volume",
+    "android_mute",
+    "android_unmute",
+    "android_get_brightness",
+    "android_set_brightness",
+    "android_wifi_status",
+    "android_wifi_enable",
+    "android_wifi_disable",
+    "android_bluetooth_status",
+    "android_bluetooth_enable",
+    "android_bluetooth_disable",
 ]
 
 EXISTING_MODULES = [

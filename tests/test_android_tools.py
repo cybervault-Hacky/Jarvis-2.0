@@ -305,6 +305,30 @@ class TrustToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.error_code, code)
                 self.assertFalse(result.success)
 
+    async def test_an_unavailable_bridge_error_keeps_its_structured_code(self) -> None:
+        """Regression: ToolResult.unavailable() takes no ``error`` keyword.
+
+        Passing one raised TypeError inside ``run``, which the framework boundary
+        then reported as a generic ``tool_error`` and lost the real code.
+        """
+        from jarvis_devices.android_bridge import AndroidCapabilityUnavailableError
+
+        for tool_class, method, error, code in (
+            (
+                DeviceStatusTool,
+                "device_status",
+                AndroidCapabilityUnavailableError("not available"),
+                ErrorCode.ANDROID_CAPABILITY_UNAVAILABLE,
+            ),
+        ):
+            bridge = FakeAndroidBridge()
+            bridge.raise_on[method] = error
+            tool = tool_class(bridge)
+            result = await tool.execute({"device": VALID_DEVICE}, _context(tool.name))
+            self.assertEqual(result.error_code, code)
+            self.assertEqual(result.status, ToolResultStatus.UNAVAILABLE)
+            self.assertNotEqual(result.error_code, ErrorCode.TOOL_ERROR)
+
     async def test_an_unexpected_exception_is_never_reported_as_success(self) -> None:
         """A crash becomes a structured TOOL_ERROR, never a success."""
         bridge = FakeAndroidBridge()

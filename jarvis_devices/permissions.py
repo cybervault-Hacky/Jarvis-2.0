@@ -46,6 +46,8 @@ __all__ = [
     "PERMISSION_BLUETOOTH_CONTROL",
     "PERMISSION_ANDROID_BRIDGE_PAIR",
     "PERMISSION_ANDROID_BRIDGE_MANAGE",
+    "PERMISSION_ANDROID_SYSTEM_READ",
+    "PERMISSION_ANDROID_SYSTEM_CONTROL",
     "READ_ONLY_PERMISSIONS",
 ]
 
@@ -74,6 +76,13 @@ PERMISSION_BLUETOOTH_CONTROL = "system.bluetooth.control"
 PERMISSION_ANDROID_BRIDGE_PAIR = "device.android.bridge.pair"
 #: Phase 5 - unpair / revoke an Android device, and manage its connection.
 PERMISSION_ANDROID_BRIDGE_MANAGE = "device.android.bridge.manage"
+#: Phase 6 - read Android system state (status, volume, brightness, radio state).
+#: Deliberately separate from the bridge pair/manage permissions: being able to
+#: look at a phone must not imply being able to change it, and being able to
+#: pair a phone must not imply being able to change its settings.
+PERMISSION_ANDROID_SYSTEM_READ = "device.android.system.read"
+#: Phase 6 - change Android system state (volume, mute, brightness, radios).
+PERMISSION_ANDROID_SYSTEM_CONTROL = "device.android.system.control"
 
 #: The only permissions granted by :meth:`PermissionPolicy.with_local_defaults`.
 READ_ONLY_PERMISSIONS: FrozenSet[str] = frozenset({PERMISSION_DEVICE_STATUS_READ})

@@ -32,6 +32,23 @@ from Jarvis_device_control import (
     android_device_unpair,
     android_device_revoke,
 )
+# Phase 6: Android system control (status / volume / mute / brightness / Wi-Fi / Bluetooth)
+# सब कुछ Phase 5 bridge से जाता है - कोई ADB, shell या arbitrary command नहीं
+from Jarvis_device_control import (
+    android_system_status,
+    android_get_volume,
+    android_set_volume,
+    android_mute,
+    android_unmute,
+    android_get_brightness,
+    android_set_brightness,
+    android_wifi_status,
+    android_wifi_enable,
+    android_wifi_disable,
+    android_bluetooth_status,
+    android_bluetooth_enable,
+    android_bluetooth_disable,
+)
 load_dotenv()
 
 
@@ -85,7 +102,20 @@ class Assistant(Agent):
                             android_device_status, #ये एक Android device का trust/connection/health बताता है (Phase 5)
                             android_device_pair, #ये verified pairing approve करता है - confirmation ज़रूरी है, पहले user से code match करवाएँ (Phase 5)
                             android_device_unpair, #ये Android device को unpair करके भुला देता है - confirmation ज़रूरी है (Phase 5)
-                            android_device_revoke #ये Android device का trust हमेशा के लिए revoke करता है - confirmation ज़रूरी है (Phase 5)
+                            android_device_revoke, #ये Android device का trust हमेशा के लिए revoke करता है - confirmation ज़रूरी है (Phase 5)
+                            android_system_status, #ये Android phone की system state बताता है - सिर्फ़ जो phone actually support करता है (Phase 6)
+                            android_get_volume, #ये Android phone का volume और mute state बताता है (Phase 6)
+                            android_set_volume, #ये Android phone का volume 0-100 पर set करता है - toggle नहीं, इसलिए दोबारा भेजना safe है (Phase 6)
+                            android_mute, #ये Android phone को mute करता है - toggle नहीं (Phase 6)
+                            android_unmute, #ये Android phone को unmute करता है - toggle नहीं (Phase 6)
+                            android_get_brightness, #ये Android phone की brightness और adaptive mode बताता है (Phase 6)
+                            android_set_brightness, #ये Android phone की brightness 0-100 पर set करता है - adaptive brightness off नहीं करता (Phase 6)
+                            android_wifi_status, #ये Android phone का Wi-Fi radio state बताता है (Phase 6)
+                            android_wifi_enable, #ये Android phone का Wi-Fi radio on करता है - confirmation मांगता है, कोई network join नहीं होता (Phase 6)
+                            android_wifi_disable, #ये Android phone का Wi-Fi radio off करता है - confirmation मांगता है (Phase 6)
+                            android_bluetooth_status, #ये Android phone का Bluetooth radio state बताता है (Phase 6)
+                            android_bluetooth_enable, #ये Android phone का Bluetooth radio on करता है - confirmation मांगता है, कोई pairing नहीं (Phase 6)
+                            android_bluetooth_disable #ये Android phone का Bluetooth radio off करता है - confirmation मांगता है (Phase 6)
                          ]
                          )
 

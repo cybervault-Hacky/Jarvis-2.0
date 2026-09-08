@@ -840,4 +840,163 @@ appearing exactly once. The bridge registry holds 31 tools with no duplicates.
 Bluetooth), Android app control, Android power control, calls, messaging,
 notifications, contacts, files, screen capture, microphone, camera, location and
 any form of Android shell or ADB execution. None of these is implemented,
+reachable through a tool, or expressible in the protocol. Phase 6 added the four
+system controls listed there; everything else remains Phase 7+.
+
+---
+
+## Phase 6 — Android System Control
+
+Android system state — status, volume, mute, brightness and the Wi-Fi and
+Bluetooth radios — driven through the Phase 5 bridge. Nothing bypasses it: every
+operation is a signed protocol frame to a cryptographically identified device.
+
+```
+JARVIS tool
+    |
+DeviceActionManager          permissions, confirmation, audit
+    |
+AndroidSystemControl         capability gate, bounded values, response envelope
+    |
+AndroidDeviceBridge          Ed25519 signature, correlation, replay guard
+    |
+Phase 5 protocol frame  --->  Android companion (AndroidSystemController)
+```
+
+### Tools
+
+| LiveKit tool | Device tool | Risk | Permission | Arguments |
+| --- | --- | --- | --- | --- |
+| `android_system_status` | `android.system.status` | `SAFE` | `device.android.system.read` | `device` |
+| `android_get_volume` | `android.system.get_volume` | `SAFE` | `device.android.system.read` | `device` |
+| `android_set_volume` | `android.system.set_volume` | `LOW_RISK` | `device.android.system.control` | `device`, `level` |
+| `android_mute` | `android.system.mute` | `LOW_RISK` | `device.android.system.control` | `device` |
+| `android_unmute` | `android.system.unmute` | `LOW_RISK` | `device.android.system.control` | `device` |
+| `android_get_brightness` | `android.system.get_brightness` | `SAFE` | `device.android.system.read` | `device` |
+| `android_set_brightness` | `android.system.set_brightness` | `LOW_RISK` | `device.android.system.control` | `device`, `level` |
+| `android_wifi_status` | `android.system.wifi.status` | `SAFE` | `device.android.system.read` | `device` |
+| `android_wifi_enable` | `android.system.wifi.enable` | `EXTERNAL_ACTION` | `device.android.system.control` | `device` |
+| `android_wifi_disable` | `android.system.wifi.disable` | `EXTERNAL_ACTION` | `device.android.system.control` | `device` |
+| `android_bluetooth_status` | `android.system.bluetooth.status` | `SAFE` | `device.android.system.read` | `device` |
+| `android_bluetooth_enable` | `android.system.bluetooth.enable` | `EXTERNAL_ACTION` | `device.android.system.control` | `device` |
+| `android_bluetooth_disable` | `android.system.bluetooth.disable` | `EXTERNAL_ACTION` | `device.android.system.control` | `device` |
+
+### Targeting and arguments
+
+Every tool takes a **registered device id** (`adev-` + 32 hex characters) and
+nothing else that identifies anything. No IP address, hostname, port, URL, MAC
+address, socket or transport identifier can be supplied; an arbitrary one is
+refused as `invalid_argument` before the bridge is ever contacted. The two
+setters also take `level`, an **integer 0-100** — `bool`, float, string, `None`,
+NaN and out-of-range values are all rejected. There is no volume-stream
+argument, so the model can never name an Android API.
+
+### Confirmation
+
+Confirmation is **classified, not blanket**: reads need none, volume and
+brightness are `LOW_RISK`, and switching a radio is `EXTERNAL_ACTION` so the
+policy asks first — the same split the PC's own Wi-Fi and Bluetooth tools use in
+Phase 3. Radio tools are deliberately *not* `confirmation_mandatory`: an operator
+can opt out via the existing `never_confirm` policy, which is a deployment
+choice, not a model bypass. No tool accepts a `confirm` argument, so nothing the
+model generates can switch confirmation off.
+
+### Idempotency: no toggles
+
+There is no `toggle` anywhere. `set_volume(50)`, `mute`, `unmute`,
+`wifi.enable` and `bluetooth.enable` all express a **desired state**, so
+re-sending a request can never produce the opposite result — which matters
+because an uncertain transport result must not be retried into a surprise.
+
+### Brightness and adaptive mode
+
+`set_brightness` does **not** turn adaptive brightness off. The result reports
+`adaptive: true` when the phone is in adaptive mode, because Android may then
+adjust the value itself; hiding that would misreport the outcome.
+
+### Protocol extension
+
+Ten new explicit request/response pairs, all allowlisted — `system_status`,
+`volume_get`, `volume_set`, `mute_set`, `brightness_get`, `brightness_set`,
+`wifi_status`, `wifi_set`, `bluetooth_status`, `bluetooth_set`, each with its own
+`*_response`. There is no generic `command`, `execute`, `run`, `shell` or `adb`
+type: a capability that is not in the enum cannot be expressed on the wire. A
+test asserts no message type contains those words.
+
+Every response carries `{"ok": bool, ...}`. A failure carries `error` from a
+fixed allowlist (`unsupported`, `unavailable`, `permission_denied`,
+`invalid_argument`, `failed`, plus the four per-subsystem `*_unavailable`
+codes); an invented reason collapses to a generic failure rather than being
+surfaced verbatim.
+
+### Capability discovery is enforced
+
+Before any operation the orchestrator checks, in order: the device is **trusted**
+(paired, not revoked), the device is **connected**, and the device actually
+**advertises** the capability. Only then is a frame sent. A phone that advertises
+`system.power` — which this build does not implement — is reported as
+`advertised_not_supported` and refused.
+
+### Failure modes
+
+`android_device_unknown`, `android_device_not_paired`, `android_device_revoked`,
+`android_device_not_connected`, `android_capability_unavailable`,
+`android_system_timeout`, `android_system_unsupported`,
+`android_system_permission_denied`, `android_system_invalid_argument`,
+`android_system_failed`, and the four `android_*_unavailable` codes.
+
+A timeout is always a timeout: the orchestrator **never retries a state-changing
+operation** after an uncertain result and never reports success. A request to a
+disconnected device is refused immediately rather than burning the timeout.
+
+### Device-side authorization
+
+The PC is not the only gate. `AndroidSystemController` is the contract a future
+companion implements, and it must verify the frame is signed by the **trusted
+host** it paired with, that the session matches, that the sequence is newer, and
+that the operation is one the user granted on the phone. The fake companion in
+the test suite performs all of these checks, and tests confirm a well-formed
+payload from an untrusted caller changes nothing.
+
+### What is absent
+
+No ADB, no subprocess, no socket, no shell, no `eval`/`exec`, no `pickle`, no
+`ctypes`, and no `os` import — the last is the Phase 1 framework invariant, which
+Phase 6 does not weaken. No SSID scanning, password handling, network joining,
+captive-portal automation, Bluetooth discovery or Bluetooth pairing. No
+arbitrary Android API or method name can be supplied by the model.
+
+### Testing status
+
+```bash
+python -m unittest discover -s tests -t . -v   # 823 tests, OK (3 skips)
+python -m pytest tests -q                      # 820 passed, 3 skipped, 36994 subtests
+python -m compileall .                         # clean
+```
+
+Phase 6 adds 112 tests: `test_android_system_control` (38 — the orchestrator over
+the real bridge: happy path, denials, unavailability, failures, timeouts,
+malformed and forged responses, replays, targeting, argument validation),
+`test_android_system_tools` (21 — declarations and tool behaviour) and
+`test_android_system_security` (53 — the 30 required security properties plus the
+static AST audit).
+
+The peer is a fake companion that speaks the real protocol over the in-memory
+transport, so signatures, sequences, sessions and replay protection are genuinely
+exercised — without a phone, Wi-Fi, Bluetooth, ADB or any external server.
+
+**Real Android tested: NO.** No Android device or real companion was involved.
+The fake companion and in-memory transport are test infrastructure only.
+
+**Dependencies changed: none.** Phase 6 uses only what Phase 5 already added.
+
+Verified against a real `livekit-agents` install: `Assistant()` registers **60
+tools** — the 15 original tools, the 2 Phase 1 tools, the 5 Phase 2 tools, the 14
+Phase 3 tools, the 5 Phase 4 tools, the 6 Phase 5 tools and the 13 Phase 6 tools,
+with every earlier tool still in the same order and each new tool appearing
+exactly once. The bridge registry holds 44 tools with no duplicates.
+
+**Out of scope (Phase 7+):** Android app control, Android power control, calls,
+messaging, notifications, contacts, files, screen capture, microphone, camera,
+location and any form of Android shell or ADB execution. None is implemented,
 reachable through a tool, or expressible in the protocol.
