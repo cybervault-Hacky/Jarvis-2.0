@@ -5,6 +5,12 @@ import sys
 import asyncio
 from fuzzywuzzy import process
 
+# Phase 3 security fix: launching goes through the *secure* Phase 2 application
+# framework (validated catalog + ShellExecute with an empty parameter string)
+# instead of a shell command line built from what the model said.
+from jarvis_devices.pc_apps import ApplicationResolver, default_application_catalog
+from jarvis_devices.pc_apps_windows import WindowsApplicationBackend
+
 try:
     from livekit.agents import function_tool
 except ImportError:
@@ -28,19 +34,35 @@ sys.stdout.reconfigure(encoding='utf-8')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# App command map
-APP_MAPPINGS = {
+# Legacy app names -> names in the secure Phase 2 application catalog.
+#
+# This used to be a map of *shell command strings* (``"settings": "start
+# ms-settings:"``, ``"command prompt": "cmd"``) that was interpolated into
+# ``start "" "<value>"`` and run through a shell, so anything JARVIS was asked to
+# open that was not in the map was executed verbatim as a command. The map now
+# holds catalog *names* only: the launch target always comes from the catalog,
+# never from the caller. "command prompt" is deliberately absent - JARVIS does
+# not open a shell on request.
+LEGACY_APP_ALIASES = {
     "notepad": "notepad",
-    "calculator": "calc",
-    "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "vlc": "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
-    "command prompt": "cmd",
-    "control panel": "control",
-    "settings": "start ms-settings:",
-    "paint": "mspaint",
-    "vs code": "C:\\Users\\gaura\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
-    "postman": "C:\\Users\\gaura\\AppData\\Local\\Postman\\Postman.exe"
+    "calculator": "calculator",
+    "chrome": "chrome",
+    "vlc": "vlc",
+    "control panel": "control-panel",
+    "settings": "settings",
+    "paint": "paint",
+    "vs code": "vs-code",
+    "vscode": "vs-code",
+    "postman": "postman",
+    "explorer": "explorer",
+    "file explorer": "explorer",
+    "edge": "edge",
+    "firefox": "firefox",
 }
+
+_application_catalog = default_application_catalog()
+_application_resolver = ApplicationResolver(_application_catalog)
+_safe_launcher = WindowsApplicationBackend()
 
 # -------------------------
 # Global focus utility
@@ -128,17 +150,34 @@ async def delete_item(path):
 # App control
 @function_tool
 async def open(app_title: str) -> str:
-    app_title = app_title.lower().strip()
-    app_command = APP_MAPPINGS.get(app_title, app_title)
+    """Launch a known application - without a shell.
+
+    Phase 3 security fix: this tool used to run ``start "" "<app_title>"`` through
+    ``shell=True``, so an unknown name - or a name containing ``&``, ``|``,
+    ``>`` or quotes - became an arbitrary command line. The requested name is now
+    only ever used to *look up* an application in the Phase 2 catalog, and the
+    catalog entry is launched with an empty parameter string.
+    """
+    requested = str(app_title or "").strip()
+    if not requested:
+        return "❌ कौन सा app खोलना है, वो बताइए।"
+
+    lookup = LEGACY_APP_ALIASES.get(requested.lower(), requested)
+    resolution = _application_resolver.resolve(lookup)
+    if not resolution.ok or resolution.spec is None:
+        # Nothing is executed here: an unknown name is reported, never launched.
+        return f"❌ '{requested}' JARVIS की app list में नहीं है, इसलिए launch नहीं किया गया।"
+
+    spec = resolution.spec
     try:
-        await asyncio.create_subprocess_shell(f'start "" "{app_command}"', shell=True)
-        focused = await focus_window(app_title)
-        if focused:
-            return f"🚀 App launch हुआ और focus में है: {app_title}."
-        else:
-            return f"🚀 {app_title} Launch किया गया, लेकिन window पर focus नहीं हो पाया।"
+        await asyncio.to_thread(_safe_launcher.launch, spec)
     except Exception as e:
-        return f"❌ {app_title} Launch नहीं हो पाया।: {e}"
+        return f"❌ {spec.display_name} Launch नहीं हो पाया।: {e}"
+
+    focused = await focus_window(spec.display_name)
+    if focused:
+        return f"🚀 App launch हुआ और focus में है: {spec.display_name}."
+    return f"🚀 {spec.display_name} Launch किया गया, लेकिन window पर focus नहीं हो पाया।"
 
 @function_tool
 async def close(window_title: str) -> str:

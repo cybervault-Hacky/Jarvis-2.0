@@ -7,6 +7,12 @@ from pynput.mouse import Button, Controller as MouseController
 from typing import List
 from livekit.agents import function_tool
 
+# Phase 3 security fix: anything written to control_log.txt is redacted with the
+# same helper the device framework uses, so typed text cannot leak a password.
+from jarvis_devices.audit import Redactor
+
+_log_redactor = Redactor()
+
 # ---------------------
 # SafeController Class
 # ---------------------
@@ -35,9 +41,15 @@ class SafeController:
             f.write(f"{datetime.now()}: {action}\n")
 
     def activate(self, token=None):
-        if token != "my_secret_token":
-            self.log("Activation attempt failed.")
-            return
+        """Arm the controller for one call.
+
+        Phase 3 security fix: this used to compare ``token`` against a secret
+        hard-coded in the source, which every internal caller passed straight
+        back - so it protected nothing while putting a credential in the
+        repository. Activation is an internal per-call state change; the real
+        gate is :meth:`is_active`. The ``token`` parameter is kept so existing
+        callers keep working.
+        """
         self.active = True
         self.activation_time = time.time()
         self.log("Controller auto-activated.")
@@ -91,7 +103,7 @@ class SafeController:
                 await asyncio.sleep(0.05)
             except Exception:
                 continue
-        self.log(f"Typed text: {text}")
+        self.log(f"Typed text: {_log_redactor.redact_text(text)}")
         return f"⌨️ Typed: {text}"
 
     async def press_key(self, key: str):
@@ -154,7 +166,7 @@ controller = SafeController()
 
 async def with_temporary_activation(fn, *args, **kwargs):
     print(f"🔍 TEMP ACTIVATION: {fn.__name__} | args: {args}")
-    controller.activate("my_secret_token")
+    controller.activate()
     result = await fn(*args, **kwargs)
     await asyncio.sleep(2)
     controller.deactivate()

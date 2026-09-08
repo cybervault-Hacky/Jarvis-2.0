@@ -12,6 +12,26 @@ from jarvis_get_whether import get_weather
 from Jarvis_window_CTRL import open, close, folder_file
 from Jarvis_file_opner import Play_file
 from keyboard_mouse_CTRL import move_cursor_tool, mouse_click_tool, scroll_cursor_tool, type_text_tool, press_key_tool, swipe_gesture_tool, press_hotkey_tool, control_volume_tool
+# Phase 1: secure device-tool framework (additive - existing tools unchanged)
+from Jarvis_device_control import device_action, device_confirmation
+# Phase 2: PC application control (registered device tools, no shell execution)
+from Jarvis_device_control import list_open_applications, application_status, open_application, focus_application, close_application
+# Phase 3: PC system control (volume / mute / brightness / Wi-Fi / Bluetooth) - registered device tools, no shell
+from Jarvis_device_control import system_status, get_system_volume, set_system_volume, get_system_mute, mute_system, unmute_system
+from Jarvis_device_control import get_system_brightness, set_system_brightness
+from Jarvis_device_control import wifi_status, wifi_enable, wifi_disable
+from Jarvis_device_control import bluetooth_status, bluetooth_enable, bluetooth_disable
+# Phase 4: PC power control (shutdown / restart / sleep / hibernate / logoff) - confirmation हमेशा मांगते हैं
+from Jarvis_device_control import shutdown_pc, restart_pc, sleep_pc, hibernate_pc, logoff_pc
+# Phase 5: Android device bridge (status / list / pair / unpair / revoke) - trust बदलने वाले tools confirmation हमेशा मांगते हैं
+from Jarvis_device_control import (
+    android_bridge_status,
+    android_device_list,
+    android_device_status,
+    android_device_pair,
+    android_device_unpair,
+    android_device_revoke,
+)
 load_dotenv()
 
 
@@ -33,7 +53,39 @@ class Assistant(Agent):
                             press_key_tool, #ये key press करने के लिए है
                             press_hotkey_tool, #ये hotkey press करने के लिए है
                             control_volume_tool, #ये volume control करने के लिए है
-                            swipe_gesture_tool #ये gesture wipe करने के लिए है 
+                            swipe_gesture_tool, #ये gesture wipe करने के लिए है 
+                            device_action, #ये registered device tools को secure तरीके से run करने के लिए है (Phase 1)
+                            device_confirmation, #ये sensitive device actions के लिए user confirmation के लिए है (Phase 1)
+                            list_open_applications, #ये currently open applications list करने के लिए है (Phase 2)
+                            application_status, #ये check करने के लिए है कि कोई app running है या नहीं (Phase 2)
+                            open_application, #ये catalog में मौजूद app को open करने के लिए है (Phase 2)
+                            focus_application, #ये किसी open window को front में लाने के लिए है (Phase 2)
+                            close_application, #ये app window को gracefully close करने के लिए है (Phase 2)
+                            system_status, #ये PC का volume, mute, brightness, Wi-Fi और Bluetooth status बताने के लिए है (Phase 3)
+                            get_system_volume, #ये PC का master volume percentage पढ़ने के लिए है (Phase 3)
+                            set_system_volume, #ये PC का master volume 0-100 पर set करने के लिए है (Phase 3)
+                            mute_system, #ये PC का master audio mute करने के लिए है (Phase 3)
+                            unmute_system, #ये PC का master audio unmute करने के लिए है (Phase 3)
+                            get_system_mute, #ये बताता है कि master audio muted है या नहीं (Phase 3)
+                            get_system_brightness, #ये display brightness percentage पढ़ने के लिए है (Phase 3)
+                            set_system_brightness, #ये display brightness 0-100 पर set करने के लिए है (Phase 3)
+                            wifi_status, #ये Wi-Fi radio on/off/unknown बताने के लिए है (Phase 3)
+                            wifi_enable, #ये Wi-Fi radio on करने के लिए है - confirmation मांगता है (Phase 3)
+                            wifi_disable, #ये Wi-Fi radio off करने के लिए है - confirmation मांगता है (Phase 3)
+                            bluetooth_status, #ये Bluetooth radio की state बताने के लिए है (Phase 3)
+                            bluetooth_enable, #ये Bluetooth on करने की कोशिश करता है - Windows में supported नहीं, तो unavailable बताता है (Phase 3)
+                            bluetooth_disable, #ये Bluetooth off करने की कोशिश करता है - Windows में supported नहीं, तो unavailable बताता है (Phase 3)
+                            shutdown_pc, #ये PC को shut down करता है - confirmation ज़रूरी है (Phase 4)
+                            restart_pc, #ये PC को restart करता है - confirmation ज़रूरी है (Phase 4)
+                            sleep_pc, #ये PC को sleep में डालता है - confirmation ज़रूरी है (Phase 4)
+                            hibernate_pc, #ये PC को hibernate करता है - confirmation ज़रूरी है (Phase 4)
+                            logoff_pc, #ये current user को log out करता है - confirmation ज़रूरी है (Phase 4)
+                            android_bridge_status, #ये Android bridge की health और pending pairings बताता है (Phase 5)
+                            android_device_list, #ये paired Android devices की list बताता है (Phase 5)
+                            android_device_status, #ये एक Android device का trust/connection/health बताता है (Phase 5)
+                            android_device_pair, #ये verified pairing approve करता है - confirmation ज़रूरी है, पहले user से code match करवाएँ (Phase 5)
+                            android_device_unpair, #ये Android device को unpair करके भुला देता है - confirmation ज़रूरी है (Phase 5)
+                            android_device_revoke #ये Android device का trust हमेशा के लिए revoke करता है - confirmation ज़रूरी है (Phase 5)
                          ]
                          )
 
