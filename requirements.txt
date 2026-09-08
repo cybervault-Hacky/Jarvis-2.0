@@ -12,4 +12,6 @@ pyautogui
 pynput
 python-Levenshtein
 pywin32
+pycaw
+cryptography
 livekit
