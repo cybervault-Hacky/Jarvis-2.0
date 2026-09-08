@@ -937,6 +937,20 @@ Before any operation the orchestrator checks, in order: the device is **trusted*
 `system.power` — which this build does not implement — is reported as
 `advertised_not_supported` and refused.
 
+### Two Phase 5 bugs found and fixed while integrating
+
+* `send_request` on a paired-but-**disconnected** device burned the whole request
+  timeout and then returned `None` — which reads as "maybe it happened". A new
+  `AndroidDeviceBridge.require_connected()` refuses up front with
+  `android_device_not_connected`. `connect()` uses an internal primitive so the
+  gate cannot deadlock the handshake itself.
+* `AndroidBridgeTool.failure()` passed `error=` to `ToolResult.unavailable()`,
+  which does not accept it. That raised `TypeError` inside `run`, and the
+  framework boundary reported a generic `tool_error`, losing the structured code
+  entirely. Fixed in both the Phase 5 and Phase 6 tool bases.
+
+Both have regression tests in the suites that own the code.
+
 ### Failure modes
 
 `android_device_unknown`, `android_device_not_paired`, `android_device_revoked`,
@@ -969,17 +983,18 @@ arbitrary Android API or method name can be supplied by the model.
 ### Testing status
 
 ```bash
-python -m unittest discover -s tests -t . -v   # 823 tests, OK (3 skips)
-python -m pytest tests -q                      # 820 passed, 3 skipped, 36994 subtests
+python -m unittest discover -s tests -t . -v   # 825 tests, OK (3 skips)
+python -m pytest tests -q                      # 822 passed, 3 skipped, 36994 subtests
 python -m compileall .                         # clean
 ```
 
-Phase 6 adds 112 tests: `test_android_system_control` (38 — the orchestrator over
+Phase 6 adds 114 tests: `test_android_system_control` (38 — the orchestrator over
 the real bridge: happy path, denials, unavailability, failures, timeouts,
 malformed and forged responses, replays, targeting, argument validation),
 `test_android_system_tools` (21 — declarations and tool behaviour) and
-`test_android_system_security` (53 — the 30 required security properties plus the
-static AST audit).
+`test_android_system_security` (51 — the 30 required security properties plus the
+static AST audit), plus 4 regression tests added to the Phase 5 suites for the two
+Phase 5 bugs fixed below.
 
 The peer is a fake companion that speaks the real protocol over the in-memory
 transport, so signatures, sequences, sessions and replay protection are genuinely
