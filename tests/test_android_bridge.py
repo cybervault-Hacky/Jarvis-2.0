@@ -26,6 +26,7 @@ from jarvis_devices.android_bridge import (
     AndroidPairingError,
     AndroidPairingExpiredError,
     AndroidPairingUnknownError,
+    AndroidDeviceNotConnectedError,
     PairingStatus,
     create_default_android_bridge,
     pairing_attestation_bytes,
@@ -428,6 +429,32 @@ class HeartbeatTests(unittest.IsolatedAsyncioTestCase):
         result, _ = await asyncio.gather(bridge.heartbeat(phone.device_id), phone.serve(max_frames=2))
         self.assertTrue(result["answered"])
         self.assertIs(bridge.health(phone.device_id), HealthState.HEALTHY)
+
+    async def test_a_request_to_a_disconnected_device_is_refused_immediately(self) -> None:
+        """Regression (Phase 5): this used to burn the whole timeout and return
+        ``None``, which reads as "maybe it happened". ``require_connected`` now
+        refuses up front with a structured error."""
+        bridge, phone, _, _ = await started_pair()
+        await complete_pairing(bridge, phone)
+        # Paired but never connected.
+        with self.assertRaises(AndroidDeviceNotConnectedError):
+            await bridge.send_request(
+                phone.device_id, MessageType.HEARTBEAT, {}, expect=MessageType.HEARTBEAT_ACK
+            )
+        # And after an explicit disconnect.
+        await asyncio.gather(bridge.connect(phone.device_id), phone.serve(max_frames=2))
+        await asyncio.gather(bridge.disconnect(phone.device_id), phone.serve(max_frames=2))
+        with self.assertRaises(AndroidDeviceNotConnectedError):
+            await bridge.send_request(
+                phone.device_id, MessageType.HEARTBEAT, {}, expect=MessageType.HEARTBEAT_ACK
+            )
+
+    async def test_connect_itself_is_not_blocked_by_the_connection_gate(self) -> None:
+        """A device is by definition not yet connected while connecting."""
+        bridge, phone, _, _ = await started_pair()
+        await complete_pairing(bridge, phone)
+        result, _ = await asyncio.gather(bridge.connect(phone.device_id), phone.serve(max_frames=2))
+        self.assertEqual(result["state"], ConnectionState.CONNECTED.value)
 
     async def test_a_device_initiated_heartbeat_refreshes_health(self) -> None:
         clock = FakeClock()
