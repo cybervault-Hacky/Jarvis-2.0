@@ -993,8 +993,10 @@ the real bridge: happy path, denials, unavailability, failures, timeouts,
 malformed and forged responses, replays, targeting, argument validation),
 `test_android_system_tools` (21 — declarations and tool behaviour) and
 `test_android_system_security` (51 — the 30 required security properties plus the
-static AST audit), plus 4 regression tests added to the Phase 5 suites for the two
-Phase 5 bugs fixed below.
+static AST audit), plus 4 net-new tests inside the Phase 5 suites: three that guard
+the two Phase 5 bugs fixed below, and one covering the Phase 6 capability gate at
+the bridge (`test_an_unadvertised_system_capability_is_refused`). Two older Phase 5
+tests were renamed rather than added, so the suite total moves by 4 and not 6.
 
 The peer is a fake companion that speaks the real protocol over the in-memory
 transport, so signatures, sequences, sessions and replay protection are genuinely
