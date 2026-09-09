@@ -193,3 +193,12 @@ class ErrorCode:
     ANDROID_MESSAGE_TIMEOUT = "android_message_timeout"
     ANDROID_MESSAGE_OPERATION_CONFLICT = "android_message_operation_conflict"
     ANDROID_MESSAGE_FAILED = "android_message_failed"
+    # Phase 9 - bounded cross-device orchestration failures.  These never
+    # indicate that an action ran; final manager/bridge errors remain separate.
+    CROSS_DEVICE_UNSUPPORTED = "cross_device_unsupported"
+    CROSS_DEVICE_AMBIGUOUS = "cross_device_ambiguous"
+    CROSS_DEVICE_TARGET_UNAVAILABLE = "cross_device_target_unavailable"
+    CROSS_DEVICE_PLAN_EXPIRED = "cross_device_plan_expired"
+    CROSS_DEVICE_PLAN_REPLAYED = "cross_device_plan_replayed"
+    CROSS_DEVICE_PLAN_INVALIDATED = "cross_device_plan_invalidated"
+    CROSS_DEVICE_PLAN_CAPACITY = "cross_device_plan_capacity"

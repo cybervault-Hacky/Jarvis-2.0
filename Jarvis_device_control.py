@@ -110,6 +110,7 @@ from jarvis_devices.android_message_tools import (
     ANDROID_MESSAGE_TOOL_NAMES,
     build_android_message_tools,
 )
+from jarvis_devices.cross_device import CrossDevicePlanner, build_cross_device_tools
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,13 @@ __all__ = [
     "run_android_message_send",
     "android_message_status",
     "android_message_send",
+    # Phase 9 - read-only cross-device intelligence (no model-facing executor)
+    "cross_device_planner",
+    "cross_device_tools",
+    "run_cross_device_status",
+    "run_cross_device_capabilities",
+    "cross_device_status",
+    "cross_device_capabilities",
 ]
 
 # ---------------------------------------------------------------------------
@@ -537,6 +545,20 @@ for _android_message_tool in android_message_tools:
     device_registry.register(_android_message_tool)
 
 device_permissions.grant(PERMISSION_ANDROID_MESSAGE_READ, PERMISSION_ANDROID_MESSAGE_SEND)
+
+# ---------------------------------------------------------------------------
+# Phase 9 - Cross-device intelligence and bounded orchestration
+#
+# The planner reads only registry metadata and the existing paired-device
+# bridge state.  It creates internal plans for application code but exposes no
+# generic plan executor to the model.  The two registered LiveKit tools below
+# are read-only inventory/capability views and still pass through the same
+# DeviceActionManager permission/audit path as every other tool.
+# ---------------------------------------------------------------------------
+cross_device_planner = CrossDevicePlanner(device_manager, android_bridge=android_bridge)
+cross_device_tools = build_cross_device_tools(cross_device_planner)
+for _cross_device_tool in cross_device_tools:
+    device_registry.register(_cross_device_tool)
 
 
 def _android_message_capabilities() -> Dict[str, str]:
@@ -1480,6 +1502,43 @@ async def run_android_message_send(device: str, recipient: str, message: str) ->
         "android.message.send",
         {"device": device, "recipient": recipient, "message": message},
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 tools - only safe inventory/capability aggregation reaches LiveKit.
+# Planning/execution is deliberately internal API; existing specific registered
+# tools and the manager confirmation flow remain the only action surface.
+# ---------------------------------------------------------------------------
+async def run_cross_device_status() -> str:
+    """Read the privacy-minimized cross-device status inventory."""
+    return await _request("cross.device.status", {})
+
+
+async def run_cross_device_capabilities() -> str:
+    """Read currently registered cross-device capability metadata."""
+    return await _request("cross.device.capabilities", {})
+
+
+@function_tool
+async def cross_device_status() -> str:
+    """Read the current safe cross-device inventory without performing an action.
+
+    The result contains canonical device ids, platform, trust/connection/
+    freshness/availability state and registered capability names only. It never
+    reveals keys, addresses, transport internals, contact/message/call data or
+    device history. An offline or revoked device is reported, never repaired.
+    """
+    return await run_cross_device_status()
+
+
+@function_tool
+async def cross_device_capabilities() -> str:
+    """Read safe registered capabilities for each known device.
+
+    This is status metadata only. It neither plans nor runs an action, grants a
+    permission, changes trust, discovers devices, or bypasses confirmation.
+    """
+    return await run_cross_device_capabilities()
 
 
 @function_tool

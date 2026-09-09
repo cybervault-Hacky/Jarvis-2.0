@@ -100,6 +100,9 @@ NEW_TOOLS = [
     # Phase 8 - Android text messaging
     "android_message_status",
     "android_message_send",
+    # Phase 9 - read-only cross-device inventory/capabilities only
+    "cross_device_status",
+    "cross_device_capabilities",
 ]
 
 EXISTING_MODULES = [
@@ -247,6 +250,8 @@ class ImportTests(unittest.TestCase):
         bridge = importlib.import_module("Jarvis_device_control")
         self.assertIs(agent.device_action, bridge.device_action)
         self.assertIs(agent.device_confirmation, bridge.device_confirmation)
+        self.assertIs(agent.cross_device_status, bridge.cross_device_status)
+        self.assertIs(agent.cross_device_capabilities, bridge.cross_device_capabilities)
 
     def test_bridge_exposes_the_phase_one_framework(self) -> None:
         bridge = importlib.import_module("Jarvis_device_control")

@@ -101,3 +101,12 @@ class ToolLifecycleEvent(str, Enum):
     EXECUTION_STARTED = "execution_started"
     EXECUTION_COMPLETED = "execution_completed"
     EXECUTION_FAILED = "execution_failed"
+    # Phase 9. These describe bounded orchestration state only; the existing
+    # manager events still describe the authoritative permission/confirmation/
+    # execution lifecycle of the registered device tool.
+    CROSS_DEVICE_PLAN_CREATED = "cross_device_plan_created"
+    CROSS_DEVICE_PLAN_SUBMITTED = "cross_device_plan_submitted"
+    CROSS_DEVICE_PLAN_PENDING = "cross_device_plan_pending"
+    CROSS_DEVICE_PLAN_COMPLETED = "cross_device_plan_completed"
+    CROSS_DEVICE_PLAN_FAILED = "cross_device_plan_failed"
+    CROSS_DEVICE_PLAN_INVALIDATED = "cross_device_plan_invalidated"

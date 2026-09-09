@@ -47,8 +47,25 @@ from .errors import (
     UnknownConfirmationError,
     UnknownToolError,
 )
-from .ids import new_confirmation_id, new_execution_id
+from .ids import new_confirmation_id, new_execution_id, new_plan_id
 from .manager import DeviceActionManager
+from .cross_device import (
+    CROSS_DEVICE_TOOL_NAMES,
+    ANDROID_TOOL_CAPABILITY_POLICY,
+    PC_TOOL_ALLOWLIST,
+    CrossDeviceAvailability,
+    CrossDeviceCapabilitiesTool,
+    CrossDeviceInventory,
+    CrossDeviceInventoryEntry,
+    CrossDeviceInventorySnapshot,
+    CrossDevicePlan,
+    CrossDevicePlanStatus,
+    CrossDevicePlanStore,
+    CrossDevicePlanner,
+    CrossDeviceResult,
+    CrossDeviceStatusTool,
+    build_cross_device_tools,
+)
 from .permissions import (
     PERMISSION_ANDROID_BRIDGE_MANAGE,
     PERMISSION_ANDROID_BRIDGE_PAIR,
@@ -142,6 +159,23 @@ __all__ = [
     # ids
     "new_execution_id",
     "new_confirmation_id",
+    "new_plan_id",
+    # Phase 9 cross-device orchestration
+    "CrossDeviceAvailability",
+    "CrossDevicePlanStatus",
+    "CrossDeviceInventoryEntry",
+    "CrossDeviceInventorySnapshot",
+    "CrossDevicePlan",
+    "CrossDeviceResult",
+    "CrossDeviceInventory",
+    "CrossDevicePlanStore",
+    "CrossDevicePlanner",
+    "CrossDeviceStatusTool",
+    "CrossDeviceCapabilitiesTool",
+    "ANDROID_TOOL_CAPABILITY_POLICY",
+    "PC_TOOL_ALLOWLIST",
+    "CROSS_DEVICE_TOOL_NAMES",
+    "build_cross_device_tools",
     # errors
     "DeviceFrameworkError",
     "ToolRegistryError",

@@ -88,6 +88,12 @@ SAFE_KEYS = frozenset(
         "expires_at",
         "requested_at",
         "duration_ms",
+        # Phase 9 bounded-plan correlation and minimal device routing metadata.
+        # These ids/capability names are non-secret and contain no content,
+        # transport, address, display-name or key material.
+        "plan_id",
+        "device_id",
+        "capability",
     }
 )
 

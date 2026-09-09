@@ -61,6 +61,8 @@ from Jarvis_device_control import (
 from Jarvis_device_control import (
     android_message_status,
     android_message_send,
+    cross_device_status,
+    cross_device_capabilities,
 )
 load_dotenv()
 
@@ -135,7 +137,9 @@ class Assistant(Agent):
                             android_call_reject, #ये सिर्फ current incoming call reject करता है - confirmation policy लागू है (Phase 7)
                             android_call_end, #ये सिर्फ current active call end करता है - confirmation policy लागू है (Phase 7)
                             android_message_status, #ये trusted Android device की text-messaging capability बताता है (Phase 8)
-                            android_message_send #ये explicit recipient को exact text send request करता है - human confirmation हमेशा ज़रूरी है (Phase 8)
+                            android_message_send, #ये explicit recipient को exact text send request करता है - human confirmation हमेशा ज़रूरी है (Phase 8)
+                            cross_device_status, #केवल safe cross-device inventory/status; कोई action नहीं (Phase 9)
+                            cross_device_capabilities #केवल registered cross-device capabilities; कोई planner/executor नहीं (Phase 9)
                          ]
                          )
 

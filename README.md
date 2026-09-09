@@ -1388,3 +1388,174 @@ The real LiveKit Phase 8 harness imports `livekit.agents.FunctionTool`, validate
 both wrapper signatures/metadata/no-duplicates, constructs a real `Agent`, and
 invokes the real send wrapper to prove an exact pending confirmation is produced
 before any registered action can execute.
+
+---
+
+## Phase 9 — Cross-Device Intelligence & Secure Orchestration
+
+Phase 9 adds a narrow, **capability-allowlisted orchestration layer** above the
+existing device framework. It does not introduce remote control, a second bridge,
+a device discovery service, a scheduler, a transport, or a generic executor.
+Its only role is to make a privacy-minimized inventory, bind an internal
+short-lived plan to one registered action and one resolved device, and hand that
+unchanged request back to the existing `DeviceActionManager`.
+
+```
+intent / application request
+    |
+CrossDevicePlanner             inventory + capability/device resolution; no execution
+    |
+immutable plan-...             bounded in-memory binding, not an authorization token
+    |
+final revalidation             registry + arguments + permission + confirmation policy
+    |                           + Android trust/connection/freshness/capability state
+    v
+DeviceActionManager.request()  existing schema -> permission -> adapter -> confirmation
+    |
+registered tool only           existing PC implementation OR authenticated Android bridge
+```
+
+### Safe inventory and capability source
+
+The on-demand inventory contains only:
+
+* canonical id (`pc-local` for the one host on which JARVIS runs, or the existing
+  Android `adev-` + 32 lowercase-hex identity), platform, trust state,
+  connection state, freshness and availability;
+* registered **tool-name** capabilities and their currently available subset.
+
+It deliberately excludes display names, public-key fingerprints, keys, pairing
+secrets, raw advertised protocol payloads, transport names, endpoint/address
+metadata, timestamps, contacts, calls, messages, notifications and history.
+It does not poll or monitor anything: each status request reads the existing
+registry/heartbeat state once.
+
+There is no remote-PC registry in the existing architecture, so Phase 9 reports
+only `pc-local`. It cannot claim a LAN, nearby, paired, named, or remote PC is
+controllable. Android entries retain their bridge-issued IDs; Phase 9 does not
+invent another Android identifier scheme.
+
+Capabilities come from the registered tool registry plus the existing Android
+bridge's current signed/paired capability state. `ANDROID_TOOL_CAPABILITY_POLICY`
+is a deliberately finite immutable binding from the pre-existing Android tool
+names to their pre-existing Phase 5–8 protocol capabilities (for example,
+`android.message.send` requires both `message.status` and `message.send`). It
+is not a capability generator or dispatch mechanism. The local-PC side is
+likewise a closed allowlist of existing Phase 2–4 PC tool names: registering a
+future arbitrary `pc.*` tool does not make it cross-device routable. Unknown
+tools, unknown capability bindings, unregistered tools and unadvertised Android
+capabilities fail closed. Tests pin the table and all routable Android
+operations.
+
+### Selection and routing policy
+
+* A supplied canonical device id is absolute: Phase 9 checks **only** it. A
+  revoked, stale, disconnected, unavailable or unsupported explicit target
+  returns a structured failure—never a fallback or migration.
+* With exactly one eligible target, that target is selected.
+* Multiple eligible targets are an explicit ambiguity for every non-read-only
+  operation. The caller must select a canonical id.
+* A read-only `SAFE` operation may use canonical-id lexical selection only when
+  its internal caller explicitly sets `allow_read_fallback=True`. It never uses
+  a display name, proximity, network/address data, previous target or any hidden
+  preference.
+* One plan means one tool and one device. There is no external-action fan-out,
+  retry, failover or automatic migration. Per-device failures stay isolated.
+
+Eligibility requires registry presence, tool availability, registered capability,
+permission policy, and (for Android) a non-revoked privileged bridge state,
+connected/fresh health, and the operation-specific advertised capability.
+`connected` alone does not make any action safe.
+
+### Plans, final checks and confirmation
+
+A plan has a non-secret `plan-...` correlation id, immutable tool/device/platform/
+risk/permission/confirmation metadata, canonical normalized arguments, an
+inventory-state token and a maximum five-minute lifetime (capped at ten minutes
+for custom callers). At most 64 plans are held in memory; no plan is persisted
+or renewed. Argument values are retained only for that bounded interval so the
+existing manager can bind a confirmation to the exact normalized request. They
+are omitted from plan summaries, inventory, audit events and the model-facing
+surface.
+
+Planning never executes. Submission atomically consumes the plan, validates the
+registered tool, tool policy, normalized arguments, permission state, confirmation
+requirement, availability and current inventory state twice immediately before
+the sole call to `DeviceActionManager.request()`. A changed/removed tool,
+permission, confirmation requirement, trust/revocation, connection/freshness,
+capability or argument normalizer invalidates the plan. Expired, replayed and
+invalidated plans cannot submit.
+
+The manager remains authoritative after that handoff, and Android controls/bridge
+repeat their own trust/capability/session checks. Phase 9 never grants a
+permission, changes pairing/trust/revocation, makes a confirmation decision,
+passes a confirmation id, weakens the Phase 7/8 exact argument binding, or calls
+a bridge/PC backend directly. An external action therefore still returns the
+existing pending confirmation and cannot run until the existing confirmed,
+single-use request is resolved.
+
+### LiveKit surface
+
+Only two new read-only, registered `FunctionTool`s are available to the model:
+
+| LiveKit tool | Registered device tool | Purpose |
+| --- | --- | --- |
+| `cross_device_status` | `cross.device.status` | Minimal safe inventory state |
+| `cross_device_capabilities` | `cross.device.capabilities` | Registered/currently available capabilities per device |
+
+Both use `DeviceActionManager` and `device.status.read`; neither accepts device
+or action arguments, creates a plan, executes a plan, discovers a device, or
+changes state. There is intentionally **no** model-facing `cross.device.plan`,
+`cross.device.execute`, generic capability/action/method endpoint, or plan-id
+executor. Internal application code can use `CrossDevicePlanner` only for a
+previously registered, policy-routable tool, and submission still delegates to
+the manager.
+
+### Audit, privacy and concurrency
+
+Phase 9 adds redacted lifecycle events for plan creation, submission, pending
+confirmation, completion, failure and invalidation. They contain only plan id,
+canonical device id, tool capability, risk, status/error and argument **names**;
+not values. A lock-protected bounded plan store makes concurrent submission
+single-use. Inventory collection handles a malformed/broken individual bridge
+record without hiding other records. It does not cache or aggregate personal
+content and never silently retries a device failure.
+
+No surveillance, background polling, contact/call/message/history scraping,
+notification access, location/audio/video/screen collection, forwarding,
+automated reply, bulk operation, shell/CMD/PowerShell/ADB/subprocess path,
+arbitrary Android API, dynamic import/eval/exec, socket listener or unrestricted
+network destination was added.
+
+### Testing and limitations
+
+The Phase 9 suite covers local-PC truthfulness, Android canonical identity,
+registry/capability derivation, explicit-target no-fallback behavior, safe
+ambiguity policy, immutable/redacted plans, expiry/replay/capacity behavior,
+permission/registry/confirmation-policy changes, revocation/capability downgrade,
+manager-only handoff, concurrent submission and model-facing read-only tools.
+Existing suite expectations were extended to account for exactly two additional
+registered read-only tools; Phase 1–8 security boundaries remain covered.
+
+**FAKE / IN-MEMORY AND REAL LIVEKIT TESTING:** The existing real `FunctionTool`
+integration path imports Phase 9's two wrappers into the actual `Agent` tool list.
+Android planner tests use real bridge identity/capability/health code over
+in-memory test state; they do not simulate a physical phone action.
+
+**REAL DEVICE TESTING: NOT PERFORMED.** No physical Android companion, remote
+PC, production Android transport, carrier/telephony/messaging service, or real
+Windows control backend was introduced or exercised. `pc-local` is the local
+host only; Phase 9 is not evidence of remote-PC support.
+
+**Dependencies and environment:** no dependency, `requirements.txt`, `.env`,
+credential or transport configuration changed. Verification uses the ignored
+project `.venv` only.
+
+### Verification
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t . -q
+.venv/bin/python -m pytest tests -q
+.venv/bin/python -m compileall -q .
+git diff --check
+```
