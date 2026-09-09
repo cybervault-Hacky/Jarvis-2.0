@@ -4,24 +4,13 @@ This is the *additive* integration point between the existing JARVIS agent
 (``agent.py`` -> ``Agent(tools=[...])``) and the new secure framework in
 :mod:`jarvis_devices`.
 
-Existing tools (``Jarvis_google_search``, ``jarvis_get_whether``,
-``Jarvis_file_opner``, ``Jarvis_window_CTRL``, ``keyboard_mouse_CTRL``) keep
-working exactly as before - nothing here replaces them.
-
-Two function tools are exposed to the model:
-
-``device_action(tool_name, arguments_json)``
-    Run a *registered* device tool. Unregistered names are rejected; arguments
-    are validated against the tool's schema; permissions and confirmations are
-    enforced by the framework.
-
-``device_confirmation(confirmation_id, approved)``
-    Apply the user's yes/no to a pending confirmation. When approved, the
-    stored action is executed; when declined, nothing runs.
-
-Both are thin ``@function_tool`` wrappers around plain coroutines
-(:func:`run_device_action` / :func:`resolve_device_confirmation`) so the logic
-stays testable whether or not LiveKit is installed.
+Phase 10 deliberately keeps legacy file/window/input modules outside the active
+Agent surface. The model can call only fixed wrappers for registered capabilities.
+There is no model-facing generic dispatcher or confirmation resolver:
+``device_action`` and ``device_confirmation`` remain plain compatibility
+coroutines for a trusted application/UI integration only. This module starts
+with read-only device-status permission; a trusted host/UI must explicitly grant
+the smallest required control permission.
 
 Phase 1 registers no real device action - only a SAFE framework self check
 (``jarvis.framework.diagnostics``) that touches no device. Future phases add
@@ -57,21 +46,6 @@ from jarvis_devices import (
 )
 from jarvis_devices.adapters import AndroidDeviceAdapter, PCDeviceAdapter
 from jarvis_devices.diagnostics import FrameworkDiagnosticsTool
-from jarvis_devices.permissions import (
-    PERMISSION_ANDROID_BRIDGE_MANAGE,
-    PERMISSION_ANDROID_BRIDGE_PAIR,
-    PERMISSION_ANDROID_SYSTEM_CONTROL,
-    PERMISSION_ANDROID_SYSTEM_READ,
-    PERMISSION_ANDROID_CALL_READ,
-    PERMISSION_ANDROID_CALL_CONTROL,
-    PERMISSION_ANDROID_MESSAGE_READ,
-    PERMISSION_ANDROID_MESSAGE_SEND,
-    PERMISSION_APP_CONTROL,
-    PERMISSION_DISPLAY_CONTROL,
-    PERMISSION_NETWORK_CONTROL,
-    PERMISSION_POWER_CONTROL,
-    PERMISSION_VOLUME_CONTROL,
-)
 from jarvis_devices.pc_apps import (
     PC_APPLICATION_TOOL_NAMES,
     ApplicationCatalog,
@@ -337,9 +311,9 @@ pc_application_tools = build_pc_application_tools(pc_application_backend, pc_app
 for _pc_tool in pc_application_tools:
     device_registry.register(_pc_tool)
 
-# Explicit opt-in for the three control operations (open / focus / close).
-# Revoke it again with ``device_permissions.revoke(PERMISSION_APP_CONTROL)``.
-device_permissions.grant(PERMISSION_APP_CONTROL)
+# Phase 10: no control permission is granted at import time. A trusted host/UI
+# integration must explicitly grant the smallest required permission through
+# grant_device_permission() for its own session/deployment policy.
 
 
 def register_application(spec: ApplicationSpec) -> ApplicationSpec:
@@ -364,19 +338,9 @@ pc_system_tools = build_pc_system_tools(pc_system_backend)
 for _pc_system_tool in pc_system_tools:
     device_registry.register(_pc_system_tool)
 
-# Explicit opt-in for the three local control capabilities. Connectivity
-# (Wi-Fi / Bluetooth) is additionally gated by the confirmation policy because
-# those tools are EXTERNAL_ACTION.
-# Revoke any of them with ``device_permissions.revoke(<permission>)``.
-device_permissions.grant(
-    PERMISSION_VOLUME_CONTROL,
-    PERMISSION_DISPLAY_CONTROL,
-    PERMISSION_NETWORK_CONTROL,
-)
-# PERMISSION_BLUETOOTH_CONTROL is deliberately NOT granted: Windows exposes no
-# reliable programmatic Bluetooth radio switch, so those two tools stay
-# permission denied instead of pretending to work. Grant it explicitly if a
-# future backend ever supports the radio.
+# Phase 10: local volume/display/network control is deny-by-default. Wi-Fi and
+# Bluetooth also remain confirmation-gated when a trusted integration elects to
+# grant their separate permissions.
 
 
 def _system_capabilities() -> Dict[str, str]:
@@ -401,10 +365,8 @@ pc_power_tools = build_pc_power_tools(pc_power_backend)
 for _pc_power_tool in pc_power_tools:
     device_registry.register(_pc_power_tool)
 
-# Explicit opt-in for power control. Revoke it with
-# ``device_permissions.revoke(PERMISSION_POWER_CONTROL)`` - the tools then answer
-# PERMISSION_DENIED and nothing can reach the operating system.
-device_permissions.grant(PERMISSION_POWER_CONTROL)
+# Phase 10: power control remains denied until a trusted host/UI grants
+# PERMISSION_POWER_CONTROL. Its mandatory confirmation applies independently.
 
 
 def _power_capabilities() -> Dict[str, str]:
@@ -446,10 +408,8 @@ android_bridge_tools = build_android_bridge_tools(android_bridge)
 for _android_tool in android_bridge_tools:
     device_registry.register(_android_tool)
 
-# Explicit opt-in. Revoke either permission and the matching tools answer
-# PERMISSION_DENIED without touching the bridge:
-#   device_permissions.revoke(PERMISSION_ANDROID_BRIDGE_MANAGE)
-device_permissions.grant(PERMISSION_ANDROID_BRIDGE_PAIR, PERMISSION_ANDROID_BRIDGE_MANAGE)
+# Phase 10: pairing and trust-management permissions are not bootstrapped.
+# A trusted host/UI must grant them explicitly; a model has no grant tool.
 
 
 def android_bridge_summary() -> Dict[str, Any]:
@@ -494,10 +454,8 @@ android_system = android_system_tools[0].control
 for _android_system_tool in android_system_tools:
     device_registry.register(_android_system_tool)
 
-# Explicit opt-in. Revoke either permission and the matching tools answer
-# PERMISSION_DENIED without the bridge ever being contacted:
-#   device_permissions.revoke(PERMISSION_ANDROID_SYSTEM_CONTROL)
-device_permissions.grant(PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL)
+# Phase 10: Android system read/control permissions are denied unless a trusted
+# host/UI explicitly grants the individually required permission.
 
 
 def _android_system_capabilities() -> Dict[str, str]:
@@ -520,9 +478,8 @@ android_calls = android_call_tools[0].control
 for _android_call_tool in android_call_tools:
     device_registry.register(_android_call_tool)
 
-# Explicit, narrowly scoped opt-in.  Read and control are separate; revoking
-# control blocks dial/answer/reject/end without affecting status.
-device_permissions.grant(PERMISSION_ANDROID_CALL_READ, PERMISSION_ANDROID_CALL_CONTROL)
+# Phase 10: Android call read and control stay separate and both are denied by
+# default. A trusted host/UI may grant either one explicitly.
 
 
 def _android_call_capabilities() -> Dict[str, str]:
@@ -544,7 +501,8 @@ android_messages = android_message_tools[0].control
 for _android_message_tool in android_message_tools:
     device_registry.register(_android_message_tool)
 
-device_permissions.grant(PERMISSION_ANDROID_MESSAGE_READ, PERMISSION_ANDROID_MESSAGE_SEND)
+# Phase 10: Android message read/send permissions stay separate and denied by
+# default. A trusted host/UI must grant either one explicitly.
 
 # ---------------------------------------------------------------------------
 # Phase 9 - Cross-device intelligence and bounded orchestration
@@ -645,26 +603,21 @@ async def resolve_device_confirmation(confirmation_id: str, approved: bool) -> s
 
 
 # ---------------------------------------------------------------------------
-# LiveKit function tools
+# Internal compatibility entry points (not LiveKit model tools)
 # ---------------------------------------------------------------------------
-@function_tool
+# Phase 10 removes the generic dispatcher and model-controlled confirmation
+# resolver from the Agent tool list.  A trusted application/UI integration may
+# still call these internal compatibility coroutines, while a model can call
+# only one of the fixed capability wrappers below.  This preserves the manager
+# boundary without allowing model output to select arbitrary registered tools or
+# approve its own pending confirmation.
 async def device_action(tool_name: str, arguments_json: str = "") -> str:
-    """Run one of JARVIS's registered device tools.
-
-    Only tools that are explicitly registered in the device tool registry can
-    run. Arguments must be a JSON object matching the tool's declared schema.
-    Sensitive tools answer with a confirmation request instead of acting.
-    """
+    """Internal compatibility wrapper for a registered device request."""
     return await run_device_action(tool_name, arguments_json)
 
 
-@function_tool
 async def device_confirmation(confirmation_id: str, approved: bool) -> str:
-    """Answer a pending device confirmation on the user's behalf.
-
-    Pass ``approved=True`` only after the user has clearly said yes. Anything
-    else is recorded as a refusal and no device action runs.
-    """
+    """Internal compatibility wrapper for a trusted human/UI approval."""
     return await resolve_device_confirmation(confirmation_id, approved)
 
 

@@ -1,0 +1,4 @@
+# Non-shipping verification tooling for the Python 3.11 test/audit environment.
+# Install this only after the runtime lock; do not deploy it with the worker.
+pip-audit==2.10.1
+pip-tools==7.6.1

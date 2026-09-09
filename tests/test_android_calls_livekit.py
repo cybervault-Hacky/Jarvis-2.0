@@ -42,6 +42,9 @@ class LiveKitCallToolTests(unittest.TestCase):
     def test_real_dial_tool_requires_approval_before_the_registered_action(self) -> None:
         import Jarvis_device_control as bridge
 
+        bridge.grant_device_permission("device.android.call.control")
+        self.addCleanup(bridge.device_permissions.revoke, "device.android.call.control")
+
         async def harness() -> str:
             return await bridge.android_call_dial("adev-" + "a" * 32, "+1 (415) 555-2671")
 

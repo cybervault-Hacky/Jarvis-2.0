@@ -8,5 +8,10 @@ __pycache__/
 .venv/
 venv/
 
-# Runtime artefacts written by the keyboard/mouse controller
+# Credentials are local runtime configuration, never source artifacts.
+.env
+.env.*
+!.env.example
+
+# Runtime artefacts written by the legacy keyboard/mouse controller
 control_log.txt

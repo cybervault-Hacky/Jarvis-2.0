@@ -14,6 +14,7 @@ replaced by inert stubs for the duration of the import test only.
 from __future__ import annotations
 
 import ast
+import asyncio
 import importlib
 import sys
 import types
@@ -22,27 +23,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Fixed informational tools retained from the original agent.  Phase 10
+# intentionally removes the legacy file/window/input controls: they could act
+# on arbitrary desktop targets outside the registered capability boundary.
 EXISTING_TOOLS = [
     "google_search",
     "get_current_datetime",
     "get_weather",
-    "open",
-    "close",
-    "folder_file",
-    "Play_file",
-    "move_cursor_tool",
-    "mouse_click_tool",
-    "scroll_cursor_tool",
-    "type_text_tool",
-    "press_key_tool",
-    "press_hotkey_tool",
-    "control_volume_tool",
-    "swipe_gesture_tool",
+]
+
+RETIRED_UNSAFE_MODEL_TOOLS = [
+    "open", "close", "folder_file", "Play_file", "move_cursor_tool",
+    "mouse_click_tool", "scroll_cursor_tool", "type_text_tool", "press_key_tool",
+    "press_hotkey_tool", "control_volume_tool", "swipe_gesture_tool",
+    "device_action", "device_confirmation",
 ]
 
 NEW_TOOLS = [
-    "device_action",
-    "device_confirmation",
     # Phase 2 - PC application control
     "list_open_applications",
     "application_status",
@@ -219,6 +216,12 @@ class AgentWiringTests(unittest.TestCase):
             with self.subTest(tool=name):
                 self.assertIn(name, declared)
 
+    def test_unsafe_legacy_and_generic_tools_are_not_model_facing(self) -> None:
+        declared = _tools_declared_in_agent()
+        for name in RETIRED_UNSAFE_MODEL_TOOLS:
+            with self.subTest(tool=name):
+                self.assertNotIn(name, declared)
+
     def test_existing_tool_order_is_preserved(self) -> None:
         declared = [name for name in _tools_declared_in_agent() if name in EXISTING_TOOLS]
         self.assertEqual(declared, EXISTING_TOOLS)
@@ -245,13 +248,37 @@ class ImportTests(unittest.TestCase):
         self.assertTrue(hasattr(agent, "Assistant"))
         self.assertTrue(callable(agent.entrypoint))
 
-    def test_agent_reaches_the_new_bridge(self) -> None:
+    def test_missing_runtime_configuration_fails_without_exposing_values(self) -> None:
+        runtime = importlib.import_module("jarvis_runtime_config")
+        self.assertEqual(runtime.runtime_configuration_errors({}), runtime.REQUIRED_RUNTIME_ENVIRONMENT)
+        with self.assertRaisesRegex(RuntimeError, "LIVEKIT_URL") as raised:
+            runtime.validate_runtime_configuration({})
+        self.assertNotIn("=", str(raised.exception))
+
+    def test_entrypoint_preflight_runs_before_session_construction(self) -> None:
+        agent = importlib.import_module("agent")
+        original_preflight, original_session = agent.validate_runtime_configuration, agent.AgentSession
+        self.addCleanup(setattr, agent, "validate_runtime_configuration", original_preflight)
+        self.addCleanup(setattr, agent, "AgentSession", original_session)
+
+        def blocked_preflight() -> None:
+            raise RuntimeError("preflight blocked")
+
+        def session_must_not_be_constructed(*args, **kwargs):
+            raise AssertionError("AgentSession was constructed before configuration preflight")
+
+        agent.validate_runtime_configuration = blocked_preflight
+        agent.AgentSession = session_must_not_be_constructed
+        with self.assertRaisesRegex(RuntimeError, "preflight blocked"):
+            asyncio.run(agent.entrypoint(object()))
+
+    def test_agent_reaches_only_fixed_capability_wrappers(self) -> None:
         agent = importlib.import_module("agent")
         bridge = importlib.import_module("Jarvis_device_control")
-        self.assertIs(agent.device_action, bridge.device_action)
-        self.assertIs(agent.device_confirmation, bridge.device_confirmation)
         self.assertIs(agent.cross_device_status, bridge.cross_device_status)
         self.assertIs(agent.cross_device_capabilities, bridge.cross_device_capabilities)
+        self.assertFalse(hasattr(agent, "device_action"))
+        self.assertFalse(hasattr(agent, "device_confirmation"))
 
     def test_bridge_exposes_the_phase_one_framework(self) -> None:
         bridge = importlib.import_module("Jarvis_device_control")

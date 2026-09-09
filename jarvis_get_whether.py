@@ -1,72 +1,88 @@
-import os
-import requests
+"""Fixed-destination weather model tool with bounded city input."""
+
+from __future__ import annotations
+
 import logging
+import os
+import re
+from typing import Any
+
+import requests
 from dotenv import load_dotenv
-from livekit.agents import function_tool  # ✅ Correct decorator
+from livekit.agents import function_tool
+from requests import RequestException
 
 load_dotenv()
-
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def detect_city_by_ip() -> str:
-    try:
-        logger.info("IP के ज़रिए शहर detect करने की कोशिश की जा रही है")
-        ip_info = requests.get("https://ipapi.co/json/").json()
-        city = ip_info.get("city")
-        if city:
-            logger.info(f"IP से शहर Detect किया गया: {city}")
-            return city
-        else:
-            logger.warning("City detect करने में विफल, default 'Delhi' इस्तेमाल किया जा रहा है।")
-            return "Delhi"
-    except Exception as e:
-        logger.error(f"IP से city detect करने में error आया: {e}")
-        return "Delhi"
+MAX_CITY_CHARACTERS = 120
+REQUEST_TIMEOUT_SECONDS = 10
+OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
+_CITY_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")
+
+
+def _validate_city(value: Any) -> str:
+    """Validate a human-readable city; it is data, never a destination."""
+    if not isinstance(value, str):
+        raise ValueError("city must be text.")
+    city = " ".join(value.split())
+    if not city:
+        raise ValueError("city is required; IP-based location lookup is disabled.")
+    if len(city) > MAX_CITY_CHARACTERS or not _CITY_RE.fullmatch(city):
+        raise ValueError("city must be at most 120 printable characters.")
+    return city
+
 
 @function_tool
 async def get_weather(city: str = "") -> str:
-    
-    api_key = os.getenv("OPENWEATHER_API_KEY")
+    """Fetch weather for an explicitly supplied city from OpenWeather.
 
-    if not api_key:
-        logger.error("OpenWeather API key missing है।")
-        return "Environment variables में OpenWeather API key नहीं मिली।"
-
-    if not city:
-        city = detect_city_by_ip()
-
-    logger.info(f"City के लिए weather fetch किया जा रहा है।: {city}")
-    url = "https://api.openweathermap.org/data/2.5/weather"
-    params = {
-        "q": city,
-        "appid": api_key,
-        "units": "metric"
-    }
-
+    No IP geolocation, arbitrary URL, host, proxy or network destination is
+    accepted. The service endpoint is fixed in source and requests have a
+    bounded timeout.
+    """
     try:
-        response = requests.get(url, params=params)
-        if response.status_code != 200:
-            logger.error(f"OpenWeather API में error आया।: {response.status_code} - {response.text}")
-            return f"Error: {city} के लिए weather fetch नहीं कर पाए। कृपया city name चेक करें।"
+        safe_city = _validate_city(city)
+    except ValueError as exc:
+        return f"Invalid weather request: {exc}"
 
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    if not api_key:
+        logger.error("OpenWeather configuration is missing.")
+        return "Weather is unavailable because required configuration is missing."
+
+    logger.info("OpenWeather requested (city_length=%d).", len(safe_city))
+    try:
+        response = requests.get(
+            OPENWEATHER_URL,
+            params={"q": safe_city, "appid": api_key, "units": "metric"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except RequestException:
+        logger.warning("OpenWeather request failed.")
+        return "Weather is temporarily unavailable."
+    status_code = response.status_code
+    if not isinstance(status_code, int) or isinstance(status_code, bool) or not 100 <= status_code <= 599:
+        logger.warning("OpenWeather returned an invalid HTTP status.")
+        return "Weather returned an invalid response."
+    if status_code != 200:
+        logger.warning("OpenWeather returned HTTP %d.", status_code)
+        return f"Weather is unavailable for the requested city (HTTP {status_code})."
+    try:
         data = response.json()
-        weather = data["weather"][0]["description"].title()
-        temperature = data["main"]["temp"]
-        humidity = data["main"]["humidity"]
-        wind_speed = data["wind"]["speed"]
-
-        result = (f"Weather in {city}:\n"
-                  f"- Condition: {weather}\n"
-                  f"- Temperature: {temperature}°C\n"
-                  f"- Humidity: {humidity}%\n"
-                  f"- Wind Speed: {wind_speed} m/s")
-
-        logger.info(f"Weather result: \n{result}")
-        return result
-
-    except Exception as e:
-        logger.exception(f"Weather fetch करते समय exception आया: {e}")
-        return "Weather fetch करते समय एक error आया"
-    
+        weather_items = data["weather"]
+        primary = weather_items[0]
+        description = str(primary["description"]).title()
+        temperature = float(data["main"]["temp"])
+        humidity = int(data["main"]["humidity"])
+        wind_speed = float(data["wind"]["speed"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        logger.warning("OpenWeather returned an invalid response.")
+        return "Weather returned an invalid response."
+    return (
+        f"Weather in {safe_city}:\n"
+        f"- Condition: {description}\n"
+        f"- Temperature: {temperature:g}°C\n"
+        f"- Humidity: {humidity}%\n"
+        f"- Wind Speed: {wind_speed:g} m/s"
+    )

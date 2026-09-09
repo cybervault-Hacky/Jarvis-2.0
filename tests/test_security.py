@@ -366,14 +366,14 @@ class LiveKitBridgeTests(unittest.IsolatedAsyncioTestCase):
         answer = await bridge.resolve_device_confirmation("cfm-does-not-exist", True)
         self.assertIn("unknown_confirmation", answer)
 
-    def test_livekit_wrappers_are_exported(self) -> None:
-        # With LiveKit installed these are FunctionTool objects; without it the
-        # fallback decorator keeps them as plain coroutines. Either way they
-        # must exist and be distinct from the underlying implementation.
-        self.assertTrue(hasattr(bridge, "device_action"))
-        self.assertTrue(hasattr(bridge, "device_confirmation"))
-        self.assertIn("device_action", bridge.__all__)
-        self.assertIn("device_confirmation", bridge.__all__)
+    def test_generic_compatibility_helpers_are_not_livekit_tools(self) -> None:
+        # A model must not choose arbitrary registered tool names or approve its
+        # own confirmation. The helpers remain internal compatibility coroutines
+        # for a trusted application/UI integration only.
+        self.assertTrue(callable(bridge.device_action))
+        self.assertTrue(callable(bridge.device_confirmation))
+        self.assertFalse(hasattr(bridge.device_action, "__livekit_tool_info"))
+        self.assertFalse(hasattr(bridge.device_confirmation, "__livekit_tool_info"))
 
     async def test_registered_tool_still_enforces_permissions(self) -> None:
         tool = FakeDeviceTool(

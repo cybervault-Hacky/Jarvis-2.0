@@ -96,7 +96,8 @@ from .registry import DeviceToolRegistry, validate_tool
 from .results import ToolResult
 from .tools import BaseDeviceTool, DeviceTool, ToolContext
 
-__version__ = "1.0.0-phase1"
+# Phase 10 completes the defined Phase 1–10 core roadmap.
+__version__ = "1.0.0"
 
 __all__ = [
     # enums

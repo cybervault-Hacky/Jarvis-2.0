@@ -39,6 +39,9 @@ class LiveKitMessageToolTests(unittest.TestCase):
     def test_real_send_wrapper_creates_exact_confirmation_before_registered_execution(self) -> None:
         import Jarvis_device_control as bridge
 
+        bridge.grant_device_permission("device.android.message.send")
+        self.addCleanup(bridge.device_permissions.revoke, "device.android.message.send")
+
         async def harness() -> str:
             return await bridge.android_message_send(
                 "adev-" + "a" * 32, "+1 (415) 555-2671", "Hello, नमस्ते 👋"

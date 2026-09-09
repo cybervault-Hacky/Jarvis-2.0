@@ -34,6 +34,7 @@ from jarvis_devices.android_system_tools import (
 )
 from jarvis_devices.enums import ToolResultStatus
 from jarvis_devices.errors import ErrorCode
+from jarvis_devices.permissions import PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL
 
 try:
     from .android_support import FakeAndroidDevice, RecordingAuditHook, requires_crypto
@@ -558,6 +559,14 @@ class ConfirmationSecurityTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self) -> None:
         self.did = "adev-" + "a" * 32
+        # Explicit trusted fixture grants; Phase 10 production startup is
+        # read-only by default.
+        bridge.grant_device_permission(PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL)
+        self.addCleanup(
+            bridge.device_permissions.revoke,
+            PERMISSION_ANDROID_SYSTEM_READ,
+            PERMISSION_ANDROID_SYSTEM_CONTROL,
+        )
 
     def payload(self, name):
         payload = {"device": self.did}

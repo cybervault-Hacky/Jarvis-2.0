@@ -1,7 +1,8 @@
 # Jarvis-2.0
 
-Voice based JARVIS assistant built on LiveKit Agents (Gemini realtime voice,
-Google search, weather, window/file control and keyboard/mouse control).
+Voice-based JARVIS assistant built on LiveKit Agents. Its current model-facing
+surface is a closed set of fixed informational and registered device-capability
+tools; legacy window/file/keyboard/mouse modules are not Agent-reachable.
 
 ---
 
@@ -1559,3 +1560,218 @@ project `.venv` only.
 .venv/bin/python -m compileall -q .
 git diff --check
 ```
+
+---
+
+# Phase 10 — Final Security, Performance, E2E & Production Certification
+
+> **Current authoritative release status (2026-09-09): BLOCKED — do not release or
+> describe this checkout as production-secure.** Earlier phase sections are historical
+> implementation notes. This section supersedes their Agent inventory, dependency,
+> configuration and verification claims where they differ.
+
+## Current architecture and trust boundaries
+
+```
+user voice/text and untrusted model output
+    -> exact closed LiveKit FunctionTool inventory (55 fixed names)
+    -> fixed wrapper and registered capability name
+    -> DeviceActionManager
+         registry lookup -> schema/normalization -> permission policy
+         -> confirmation policy + trusted human/UI decision -> platform adapter
+    -> local PC backend OR authenticated Android bridge
+         Android identity/trust/revocation/session/freshness/capability/replay checks
+    -> operating-system API or future trusted Android companion
+```
+
+There is no model-facing generic dispatcher, confirmation resolver, shell,
+command/API/method argument, planner executor, arbitrary Android API, arbitrary
+network destination, or transport bypass. `device_action` and
+`device_confirmation` are undecorated compatibility coroutines for a **trusted
+application/UI** only; they are not in `Assistant().tools`. A deployment that
+has no trusted confirmation UI cannot safely complete external/destructive
+requests: they remain pending rather than being auto-approved.
+
+The manager remains the only device-action execution path. The Phase 9 planner
+only accepts the finite PC/Android capability mappings, creates bounded immutable
+plans, consumes them once, revalidates registry/arguments/permissions/
+confirmation/device state immediately before hand-off, and delegates once to the
+manager. It never migrates, retries, fans out, grants permission, approves a
+confirmation, or calls a backend/bridge itself. Explicit targets never fall
+back; only an expressly enabled SAFE read path can use documented deterministic
+selection.
+
+## Closed-world inventories
+
+The complete 53-entry registry inventory and exact 55-entry actual LiveKit Agent
+inventory, including host platform, route/capability, permission, risk,
+confirmation requirement and target requirement, are in
+[`docs/PHASE10_INVENTORY.md`](docs/PHASE10_INVENTORY.md). They are generated from
+the inspected live registry during verification and pinned by
+`tests/test_phase10_inventory.py`.
+
+The registry platform is the host executing a tool. Android rows therefore show
+`pc`: the host wrapper sends a fixed, authenticated protocol operation and still
+requires a canonical bridge-issued `adev-...` target. It is not a claim that an
+Android device is a PC, or that the host can route to arbitrary hardware.
+
+## Security controls verified
+
+* **Hostile model/user data:** closed tool names, strict schemas, canonical Android
+  IDs and E.164 recipient validation reject unknown fields, command-like data,
+  raw methods, host/address/URL inputs, malformed JSON and oversized data before
+  dispatch. Message bodies stay opaque and bounded; they are never interpreted.
+* **Permission and confirmation:** permission is checked before confirmation and
+  execution; denied requests do not contact a backend. External/destructive tools
+  require a confirmation under the effective policy; dial/message send and power
+  retain mandatory binding. Confirmation requests expire, are single-use and bind
+  tool, normalized arguments and target; changing any item, replaying a yes, or
+  migrating devices fails.
+* **Android trust and protocol:** Android operations require a registered canonical
+  identity plus current trust/revocation, pairing, connection, freshness and
+  operation-specific advertised capability. The existing Ed25519 protocol binds
+  device/session/request/nonce/sequence and rejects forged, stale, malformed,
+  oversized and replayed frames. No installed network listener or Android
+  transport exists; the repository's transport is queue-based in-memory testing.
+* **Timeouts and recovery:** bridge timeouts are honest unknown/not-executed
+  outcomes and message send has no automatic resend. Reads and actions are gated
+  separately; a stale Android session blocks operations until the existing
+  authenticated heartbeat establishes recovery.
+* **Privacy:** inventories omit keys, endpoint/address/transport data, display
+  names, contacts, messages, calls, notification/history and argument values.
+  Audit records carry IDs, status and argument names only; protected phone/message
+  values are redacted. Search results are labelled untrusted reference data and
+  never authorize another tool call.
+* **Resource bounds:** argument schemas, protocol frame sizes, request timeouts,
+  confirmation capacity/expiry, plan capacity/expiry, result counts and text byte
+  limits are bounded. There is no polling loop or persistent personal-data cache.
+
+### Static-dangerous-construct classification
+
+The complete production Python tree was AST- and source-audited by
+`tests/test_phase10_static_audit.py`.
+
+| Construct/location | Classification | Context and disposition |
+| --- | --- | --- |
+| `requests.get` in `Jarvis_google_search.py`, `jarvis_get_whether.py` | SAFE | Only source-defined HTTPS Google Custom Search/OpenWeather destinations; bounded data, 10-second timeout, no raw provider body/exception reflection. |
+| `os.getenv` in search/weather and `os.environ` in `jarvis_runtime_config.py` | SAFE | Reads runtime configuration only; values are never returned or logged. |
+| `asyncio`, queue transport and locks in framework | SAFE | Manager/bridge timeout, concurrency and in-memory test transport support; no socket listener. |
+| `subprocess` / `os.startfile` in `Jarvis_file_opner.py`, `Jarvis_window_CTRL.py` | LEGACY-UNREACHABLE | These old filesystem/window modules are not imported or registered by `agent.py`; their wrappers are absent from the actual Agent inventory. They remain technical debt and are not a supported deployment interface. |
+| GUI input/temporary activation in `keyboard_mouse_CTRL.py` | LEGACY-UNREACHABLE | Not imported or registered by the Agent; no current capability path reaches it. |
+| `pickle` and process mocks in `tests/` | TEST-ONLY | Negative protocol/deserialization and no-spawn tests only; not production imports. |
+| `eval`, `exec`, dynamic import, unsafe deserializer, `socket`, listener, `ctypes` production imports | SAFE | No production occurrence; Phase 10 AST test fails on any of these imports/calls. |
+
+The legacy-unreachable rows are deliberately disclosed rather than treated as
+secure functionality. Their continued presence is not a release-quality reason
+to re-enable them.
+
+## Network, dependencies and configuration
+
+Outbound behavior in this repository is limited to: (1) the LiveKit/Google
+realtime libraries configured by the deployment's LiveKit/Google credentials,
+and (2) optional fixed HTTPS calls to the two source constants above. Search
+requires `GOOGLE_SEARCH_API_KEY` and `SEARCH_ENGINE_ID`; weather requires
+`OPENWEATHER_API_KEY`. Missing optional settings return an explicit unavailable
+result without a request. Weather requires an explicit city and makes no IP
+geolocation request. The Android bridge ships with no network listener,
+discovery service or production transport.
+
+Copy `.env.example` to a local ignored `.env` or use a secret manager; never
+commit populated values. The worker additionally needs `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and `GOOGLE_API_KEY`. The current
+process singleton starts with only `device.status.read`; it grants no control,
+pairing, call, or message permission at import time. A trusted host/UI
+integration must explicitly grant the smallest needed permission with
+`grant_device_permission()` for its own session/deployment policy. That helper
+is not model-facing, and confirmation independently gates external/destructive
+operations. **This repository does not provide a trusted human-confirmation UI
+integration.** The Agent exposes no confirmation resolver; without such a host
+integration, sensitive requests remain pending until expiry/cancellation and
+must not execute. `jarvis_runtime_config.validate_runtime_configuration()` checks
+the required worker setting names before `entrypoint` opens a LiveKit session,
+never including values in an error. Model instructions must never be used to
+grant permissions or approve confirmations.
+
+`requirements.txt` is the human-reviewed direct runtime dependency input and
+preserves Windows markers for `pywin32`/`pycaw`. `requirements.lock` is the
+generated Python 3.11 production Linux transitive lock with exact versions and
+hashes; install it with `--require-hashes`. `requirements.test.in` and its
+generated `requirements.test.lock` are the separate non-shipping, hashed Python
+3.11 verification-tool lock (`pip-audit` and `pip-tools`), installed only after
+the runtime lock. The project tests themselves use the standard-library
+`unittest` runner and do not add a runtime dependency. `requirements.windows.lock`
+is only a manually assembled CPython 3.11/win_amd64 wheel-hash companion for the
+Windows-only packages; it was not produced by a successful cross-platform
+resolver or installed on Windows, so it is **not release-certified** and must
+not be deployed until native validation is recorded. A fresh Python 3.11 Linux
+virtual environment installed both runtime and verification locks with `pip check`
+succeeding. `pip-audit -r requirements.lock` returned **No known vulnerabilities found** on
+2026-09-09. Locks must be regenerated in a reviewed build environment whenever
+the corresponding direct manifest changes.
+
+### Startup (after the release blockers below are cleared)
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r requirements.lock
+# Verification only (not shipped with the worker):
+.venv/bin/python -m pip install --require-hashes -r requirements.test.lock
+# Do not deploy requirements.windows.lock until its documented native-Windows
+# validation gate has passed.
+cp .env.example .env                    # populate only through local secret handling
+.venv/bin/python agent.py start         # use the appropriate LiveKit worker CLI deployment command
+```
+
+Use a Windows deployment for actual PC backends. This Linux verification host
+has no supported Windows control backend, physical Android device, carrier,
+Android companion or production Android transport.
+
+## Phase 10 E2E matrix and actual evidence
+
+| Path | Evidence | Result / scope |
+| --- | --- | --- |
+| Actual Agent registration | `test_phase10_inventory` constructs real installed `livekit.agents.Agent` / `FunctionTool` | 55 exact fixed tools; generic dispatch and model confirmation excluded. |
+| Manager success/denial/confirmation | Phase 1–4 manager, permission, confirmation, PC tests | Passed in-memory/fake backend matrix; no Windows hardware action on this Linux host. |
+| Android identity/pairing/protocol/replay/stale/recovery | Phase 5–8 Android bridge/protocol/security suites | Passed real repository crypto/protocol code over queue-based fake peers; not a network or physical-phone test. |
+| Call action | `test_phase10_e2e` | Signed fake-peer status then pending exact dial then one trusted confirmation/execution; confirmation replay rejected. |
+| Message action | `test_phase10_e2e` | Permission-denied path sends nothing; exact canonical recipient/body is accepted once only after confirmation. |
+| Planner TOCTOU, revoke/capability/permission change, expiry, replay, concurrency | Phase 9 `test_cross_device` suite | Passed with in-memory managers/bridges; no migration/fallback/fan-out. |
+| Fixed HTTP failure/privacy behavior | `test_phase10_network` | Mocked fixed-destination calls verify timeouts, missing config, invalid input/provider data and non-reflection; no real HTTP performed. |
+| Static/network surface | `test_phase10_static_audit` | Passed; only classified fixed HTTP and unreachable legacy subprocess imports remain. |
+
+**Real LiveKit classes:** exercised locally by real installed classes and real
+FunctionTool registration/invocation wrappers. **In-memory/fake:** all device,
+Android transport, companion, PC backend and E2E action tests. **Real hardware,
+carrier/network Android transport and real Windows platform actions:** **NOT
+PERFORMED**. This distinction is mandatory: passing fake tests is not a claim of
+physical-device or production-network certification.
+
+## Release gate and limitations
+
+**BLOCKED.** Recovery found the verified Phase 7→9 branch lineage carries an
+older tracked `.env` blob with the listed credential names but empty values.
+However, the configured remote's `main` history contains non-empty values in
+`57d26a5` and `8a2de20`; the original credential strings are recoverable from
+those reachable remote commits. Phase 10 removes `.env` from the current tip's
+index, adds ignore rules and an empty template, but cannot revoke exposed
+credentials or rewrite remote/main history. Treat every value ever present there
+as compromised: rotate/revoke the LiveKit, Google, and OpenWeather credentials,
+remove the secret from every retained/ref/mirror history using the repository owner's
+approved history-remediation process, force-push only under that coordinated
+process, and verify with a fresh secret scan before release.
+
+Until that is complete, **JARVIS-2.0 v1.0 is not certified or tagged**. A
+reviewed hash-locked production dependency policy, a trusted confirmation/UI
+integration, and real target-environment/hardware validation are also required
+before making any production-security claim. No Phase 11 is proposed.
+
+### Local non-hardware performance measurement (2026-09-09)
+
+On this Linux/Python 3.11 verification host, with a harmless in-memory SAFE
+registered tool and no network/hardware I/O, actual timing was: 1,000
+`DeviceActionManager.request()` calls in **0.075891 s** (**0.076 ms/request**);
+64 bounded `CrossDevicePlanner` create+submit calls in **0.011634 s**
+(**0.182 ms/plan**; 64 is the intentional store capacity); and 100 actual
+LiveKit `Assistant()` constructions in **0.006950 s** (**0.069 ms/instance**).
+These are local micro-measurements, not latency, throughput, carrier, LiveKit
+service, Windows API or physical-device performance guarantees.

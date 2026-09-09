@@ -267,6 +267,9 @@ class BridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.patcher = BridgePowerBackend(self.fake)
         self.patcher.__enter__()
         self.addCleanup(self.patcher.__exit__, None, None, None)
+        # Explicit trusted fixture grant; production does not bootstrap power.
+        bridge.grant_device_permission(PERMISSION_POWER_CONTROL)
+        self.addCleanup(bridge.device_permissions.revoke, PERMISSION_POWER_CONTROL)
 
     # ------------------------------------------------------------------
     async def test_every_power_operation_asks_first_and_runs_nothing(self) -> None:

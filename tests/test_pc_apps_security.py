@@ -21,6 +21,7 @@ from unittest import mock
 
 import Jarvis_device_control as bridge
 from jarvis_devices import ErrorCode
+from jarvis_devices.permissions import PERMISSION_APP_CONTROL
 from jarvis_devices.pc_apps import (
     ApplicationSpec,
     PC_APPLICATION_TOOL_NAMES,
@@ -119,6 +120,10 @@ class NoProcessSpawningTests(unittest.TestCase):
 
 class ArbitraryExecutionTests(unittest.TestCase):
     def test_shell_like_names_are_unknown_applications(self) -> None:
+        # Grant only so the test reaches the catalog validator, not because the
+        # production process has this permission by default.
+        bridge.grant_device_permission(PERMISSION_APP_CONTROL)
+        self.addCleanup(bridge.device_permissions.revoke, PERMISSION_APP_CONTROL)
         fake = FakePCBackend((CHROME_WINDOW,))
         with BridgeDesktop(fake):
             for payload in HOSTILE_INPUTS:
@@ -187,8 +192,7 @@ class ArbitraryExecutionTests(unittest.TestCase):
         self.assertIn(ErrorCode.UNKNOWN_TOOL, answer)
 
     def test_device_action_cannot_reach_pc_tools_without_permission(self) -> None:
-        bridge.device_permissions.revoke("system.app.control")
-        self.addCleanup(bridge.device_permissions.grant, "system.app.control")
+        bridge.device_permissions.revoke(PERMISSION_APP_CONTROL)
         fake = FakePCBackend((CHROME_WINDOW,))
         with BridgeDesktop(fake):
             answer = asyncio.run(bridge.run_device_action("pc.app.close", '{"app": "notepad"}'))
@@ -197,6 +201,13 @@ class ArbitraryExecutionTests(unittest.TestCase):
 
 
 class BridgeBehaviourTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Production now starts deny-by-default. This fixture represents the
+        # trusted host/UI selecting the one capability required for these fake
+        # backend behavior checks.
+        bridge.grant_device_permission(PERMISSION_APP_CONTROL)
+        self.addCleanup(bridge.device_permissions.revoke, PERMISSION_APP_CONTROL)
+
     def test_open_application_launches_a_catalogued_app(self) -> None:
         fake = FakePCBackend()
         with BridgeDesktop(fake):
