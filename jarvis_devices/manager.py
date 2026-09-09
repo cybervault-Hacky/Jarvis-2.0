@@ -153,7 +153,7 @@ class DeviceActionManager:
         # not merely an equivalent-looking presentation string.
         try:
             validated = tool.normalize_arguments(validated)
-        except (TypeError, ValueError):
+        except Exception:  # noqa: BLE001 - normalizers are an untrusted input boundary
             return self._log_failure(
                 ToolResult.invalid_argument(
                     f"Invalid arguments for {tool.name}.",
@@ -249,7 +249,11 @@ class DeviceActionManager:
             # Let a trusted tool render its own human-facing target.  The
             # manager never logs this value; it is held only in the pending
             # confirmation/UI so an explicit destination can be approved.
-            confirmation_target = target or tool.confirmation_target(validated)
+            confirmation_target = (
+                tool.confirmation_target(validated)
+                if getattr(tool, "confirmation_target_mandatory", False)
+                else (target or tool.confirmation_target(validated))
+            )
             pending = self.confirmations.create(
                 tool.name,
                 confirmation_target,

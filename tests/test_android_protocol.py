@@ -92,9 +92,9 @@ class MessageTypeAllowlistTests(unittest.TestCase):
 
     def test_the_allowlist_is_explicit_and_bounded(self) -> None:
         self.assertEqual(MESSAGE_TYPES, frozenset(member.value for member in MessageType))
-        # 13 Phase 5 frames + 20 Phase 6 frames + 10 Phase 7 call frames.
-        # The bound exists so the set stays enumerable and reviewable.
-        self.assertLessEqual(len(MESSAGE_TYPES), 56)
+        # 13 Phase 5 frames + 20 Phase 6 frames + 10 Phase 7 call frames
+        # + 4 Phase 8 message frames. The bound stays enumerable/reviewable.
+        self.assertLessEqual(len(MESSAGE_TYPES), 60)
 
     def test_no_command_shaped_message_type_exists(self) -> None:
         for name in MESSAGE_TYPES:

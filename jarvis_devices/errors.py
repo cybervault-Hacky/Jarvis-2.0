@@ -184,3 +184,12 @@ class ErrorCode:
     ANDROID_CALL_NO_ACTIVE_CALL = "android_call_no_active_call"
     ANDROID_CALL_TIMEOUT = "android_call_timeout"
     ANDROID_CALL_FAILED = "android_call_failed"
+    # Phase 8 - Android text messaging.  These are not system/call outcomes:
+    # each maps to the narrow messaging surface only.
+    ANDROID_MESSAGE_UNAVAILABLE = "android_message_unavailable"
+    ANDROID_MESSAGE_UNSUPPORTED = "android_message_unsupported"
+    ANDROID_MESSAGE_PERMISSION_DENIED = "android_message_permission_denied"
+    ANDROID_MESSAGE_INVALID_ARGUMENT = "android_message_invalid_argument"
+    ANDROID_MESSAGE_TIMEOUT = "android_message_timeout"
+    ANDROID_MESSAGE_OPERATION_CONFLICT = "android_message_operation_conflict"
+    ANDROID_MESSAGE_FAILED = "android_message_failed"

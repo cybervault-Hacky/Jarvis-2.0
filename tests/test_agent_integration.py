@@ -97,6 +97,9 @@ NEW_TOOLS = [
     "android_call_answer",
     "android_call_reject",
     "android_call_end",
+    # Phase 8 - Android text messaging
+    "android_message_status",
+    "android_message_send",
 ]
 
 EXISTING_MODULES = [

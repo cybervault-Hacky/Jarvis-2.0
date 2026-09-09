@@ -64,6 +64,8 @@ __all__ = [
     "SYSTEM_CONTROL_RESPONSES",
     "CALL_REQUESTS",
     "CALL_RESPONSES",
+    "MESSAGE_REQUESTS",
+    "MESSAGE_RESPONSES",
     "ALL_CAPABILITIES",
     "CAPABILITY_BRIDGE_PROTOCOL",
     "CAPABILITY_DEVICE_STATUS",
@@ -76,6 +78,8 @@ __all__ = [
     "CAPABILITY_CALL_ANSWER",
     "CAPABILITY_CALL_REJECT",
     "CAPABILITY_CALL_END",
+    "CAPABILITY_MESSAGE_STATUS",
+    "CAPABILITY_MESSAGE_SEND",
     "validate_percent",
     "PERCENT_MIN",
     "PERCENT_MAX",
@@ -172,6 +176,13 @@ class MessageType(str, Enum):
     CALL_END = "call_end"
     CALL_END_RESPONSE = "call_end_response"
 
+    # Phase 8 - explicit Android text messaging.  These carry opaque text in
+    # a strict payload; they are never a raw Android intent or command.
+    MESSAGE_STATUS = "message_status"
+    MESSAGE_STATUS_RESPONSE = "message_status_response"
+    MESSAGE_SEND = "message_send"
+    MESSAGE_SEND_RESPONSE = "message_send_response"
+
 
 #: Explicit allowlist - the only values accepted on the wire.
 MESSAGE_TYPES: FrozenSet[str] = frozenset(member.value for member in MessageType)
@@ -217,6 +228,9 @@ RESPONSE_FOR: Dict[str, str] = {
     MessageType.CALL_ANSWER.value: MessageType.CALL_ANSWER_RESPONSE.value,
     MessageType.CALL_REJECT.value: MessageType.CALL_REJECT_RESPONSE.value,
     MessageType.CALL_END.value: MessageType.CALL_END_RESPONSE.value,
+    # Phase 8 - each text-message operation has one dedicated response.
+    MessageType.MESSAGE_STATUS.value: MessageType.MESSAGE_STATUS_RESPONSE.value,
+    MessageType.MESSAGE_SEND.value: MessageType.MESSAGE_SEND_RESPONSE.value,
 }
 
 #: Phase 6 system-control requests (JARVIS -> phone). Everything outside this
@@ -255,6 +269,18 @@ CALL_REQUESTS: FrozenSet[str] = frozenset(
 
 #: Their dedicated responses (phone -> JARVIS).
 CALL_RESPONSES: FrozenSet[str] = frozenset(RESPONSE_FOR[name] for name in CALL_REQUESTS)
+
+#: Phase 8 text-message requests.  This deliberately has no generic messaging,
+#: intent, arbitrary method or raw-send frame.
+MESSAGE_REQUESTS: FrozenSet[str] = frozenset(
+    {
+        MessageType.MESSAGE_STATUS.value,
+        MessageType.MESSAGE_SEND.value,
+    }
+)
+
+#: Their dedicated responses (phone -> JARVIS).
+MESSAGE_RESPONSES: FrozenSet[str] = frozenset(RESPONSE_FOR[name] for name in MESSAGE_REQUESTS)
 
 
 class AndroidProtocolError(Exception):
@@ -302,6 +328,10 @@ CAPABILITY_CALL_DIAL = "call.dial"
 CAPABILITY_CALL_ANSWER = "call.answer"
 CAPABILITY_CALL_REJECT = "call.reject"
 CAPABILITY_CALL_END = "call.end"
+# Phase 8 uses a separate status capability so advertising a messaging status
+# endpoint never grants the power to send text.
+CAPABILITY_MESSAGE_STATUS = "message.status"
+CAPABILITY_MESSAGE_SEND = "message.send"
 
 #: Everything this JARVIS build actually understands. A phone may advertise more
 #: (``system.power``, ``comms.call``, ...); those are reported as advertised but
@@ -318,6 +348,8 @@ ALL_CAPABILITIES: Tuple[str, ...] = (
     CAPABILITY_CALL_ANSWER,
     CAPABILITY_CALL_REJECT,
     CAPABILITY_CALL_END,
+    CAPABILITY_MESSAGE_STATUS,
+    CAPABILITY_MESSAGE_SEND,
 )
 
 #: Bounded representation for volume and brightness: an integer percentage.

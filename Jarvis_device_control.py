@@ -64,6 +64,8 @@ from jarvis_devices.permissions import (
     PERMISSION_ANDROID_SYSTEM_READ,
     PERMISSION_ANDROID_CALL_READ,
     PERMISSION_ANDROID_CALL_CONTROL,
+    PERMISSION_ANDROID_MESSAGE_READ,
+    PERMISSION_ANDROID_MESSAGE_SEND,
     PERMISSION_APP_CONTROL,
     PERMISSION_DISPLAY_CONTROL,
     PERMISSION_NETWORK_CONTROL,
@@ -103,6 +105,10 @@ from jarvis_devices.android_system_tools import (
 from jarvis_devices.android_call_tools import (
     ANDROID_CALL_TOOL_NAMES,
     build_android_call_tools,
+)
+from jarvis_devices.android_message_tools import (
+    ANDROID_MESSAGE_TOOL_NAMES,
+    build_android_message_tools,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,6 +245,13 @@ __all__ = [
     "android_call_answer",
     "android_call_reject",
     "android_call_end",
+    # Phase 8 - Android text messaging
+    "android_messages",
+    "android_message_tools",
+    "run_android_message_status",
+    "run_android_message_send",
+    "android_message_status",
+    "android_message_send",
 ]
 
 # ---------------------------------------------------------------------------
@@ -274,6 +287,7 @@ def framework_summary() -> Dict[str, Any]:
         "android_bridge": _android_bridge_summary(),
         "android_system_capabilities": _android_system_capabilities(),
         "android_call_capabilities": _android_call_capabilities(),
+        "android_message_capabilities": _android_message_capabilities(),
         "available_tools": [tool.name for tool in device_registry.list_tools(available_only=True)],
         "granted_permission_count": len(device_permissions.granted_permissions),
         "platforms": device_platforms.describe(),
@@ -508,6 +522,28 @@ def _android_call_capabilities() -> Dict[str, str]:
     from jarvis_devices.android_calls import CALL_CAPABILITIES
 
     return {capability: "understood" for capability in CALL_CAPABILITIES}
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 - Android text messaging
+#
+# The two fixed tools reuse the authenticated Phase 5 bridge, current registry,
+# permission policy and confirmation manager.  They expose neither contacts nor
+# message history; sending requires a canonical recipient and opaque text.
+# ---------------------------------------------------------------------------
+android_message_tools = build_android_message_tools(android_bridge)
+android_messages = android_message_tools[0].control
+for _android_message_tool in android_message_tools:
+    device_registry.register(_android_message_tool)
+
+device_permissions.grant(PERMISSION_ANDROID_MESSAGE_READ, PERMISSION_ANDROID_MESSAGE_SEND)
+
+
+def _android_message_capabilities() -> Dict[str, str]:
+    """Which explicit Android messaging capabilities this build understands."""
+    from jarvis_devices.android_messages import MESSAGE_CAPABILITIES
+
+    return {capability: "understood" for capability in MESSAGE_CAPABILITIES}
 
 
 # ---------------------------------------------------------------------------
@@ -1424,3 +1460,54 @@ async def android_call_end(device: str) -> str:
         device: The registered device id from ``android_device_list``.
     """
     return await run_android_call_end(device)
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 tools - Android text messaging
+#
+# The model selects only a trusted device, explicit international recipient and
+# opaque message text.  It cannot send a contact id, URI, transport endpoint,
+# operation id, Android API/method, retry, or confirmation bypass.
+# ---------------------------------------------------------------------------
+async def run_android_message_status(device: str) -> str:
+    """Report privacy-safe text-messaging capability for a trusted device."""
+    return await _request("android.message.status", {"device": device})
+
+
+async def run_android_message_send(device: str, recipient: str, message: str) -> str:
+    """Request one explicitly confirmed text message."""
+    return await _request(
+        "android.message.send",
+        {"device": device, "recipient": recipient, "message": message},
+    )
+
+
+@function_tool
+async def android_message_status(device: str) -> str:
+    """Report text-messaging availability on a trusted Android device.
+
+    This is read only. It returns only current messaging capability/availability
+    metadata, never contacts, conversations, notifications, message history or
+    message contents.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_message_status(device)
+
+
+@function_tool
+async def android_message_send(device: str, recipient: str, message: str) -> str:
+    """Send one text message after explicit human confirmation.
+
+    ``recipient`` must be an international E.164 phone number starting with
+    ``+``; contact names, URI schemes and endpoints are not accepted.  The
+    message is bounded opaque Unicode text and is sent exactly as written.  The
+    confirmation shows the selected device, canonical recipient and exact text.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+        recipient: Explicit international E.164 recipient beginning with +.
+        message: The exact bounded Unicode text to send.
+    """
+    return await run_android_message_send(device, recipient, message)

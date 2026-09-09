@@ -95,7 +95,11 @@ class ConfirmationRequest:
         must not turn that sensitive UI value into an audit/debug value.
         """
         risk = self.risk_level.value if self.risk_level else "unknown"
-        target = "[sensitive confirmation target]" if self.action == "android.call.dial" else (self.target or "no target")
+        target = (
+            "[sensitive confirmation target]"
+            if self.action in {"android.call.dial", "android.message.send"}
+            else (self.target or "no target")
+        )
         return f"{self.action} ({target}) [risk={risk}]"
 
     def to_dict(self) -> Dict[str, Any]:

@@ -1192,10 +1192,11 @@ not be represented as a real phone.
 ### Deliberately absent
 
 No call interception, recording, spying, hidden monitoring, microphone access,
-call-content access, contact scraping, SMS/messaging, background/silent dialing,
-permission bypass, Android confirmation bypass, ADB, shell/process invocation,
-arbitrary network destination, desktop telephony fallback, arbitrary Android API
-method, or toggle/retry operation exists.
+call-content access, contact scraping, background/silent dialing, permission
+bypass, Android confirmation bypass, ADB, shell/process invocation, arbitrary
+network destination, desktop telephony fallback, arbitrary Android API method,
+or toggle/retry operation exists. Phase 8's separate narrow text-message tools
+do not add any call capability.
 
 ### Verification
 
@@ -1213,3 +1214,177 @@ The real LiveKit harness imports `livekit.agents.FunctionTool`, verifies all fiv
 Phase 7 wrappers are genuine FunctionTool objects with exact signatures and
 metadata, and invokes the real dial wrapper to prove it produces a pending
 explicit confirmation before any registered action runs.
+
+
+---
+
+## Phase 8 — Android Messaging
+
+Phase 8 adds a deliberately narrow Android **text messaging** surface using the
+same authenticated Phase 5 `AndroidDeviceBridge`, `DeviceActionManager`,
+permission policy, confirmation manager, trusted `adev-...` identity model and
+versioned protocol used by Phases 5–7. It does not add a transport, listener,
+network destination, telephony implementation, contact resolver or general
+messaging engine.
+
+```
+JARVIS / LiveKit FunctionTool
+    |
+DeviceActionManager       validation, permission, explicit confirmation, redacted audit
+    |
+AndroidMessageTool        exact device + recipient + opaque message validation
+    |
+AndroidMessageControl     bridge freshness + message.status + message.send capability gates
+    |
+AndroidDeviceBridge       Ed25519, session, request id, nonce, sequence, replay guard
+    |
+explicit Phase 8 frame --> future Android companion (AndroidMessageController)
+```
+
+### Supported tools and permissions
+
+| LiveKit tool | Registered device tool | Risk | Permission | Arguments |
+| --- | --- | --- | --- | --- |
+| `android_message_status` | `android.message.status` | `SAFE` | `device.android.message.read` | `device` |
+| `android_message_send` | `android.message.send` | `EXTERNAL_ACTION` | `device.android.message.send` | `device`, `recipient`, `message` |
+
+All operations target one registered trusted bridge identity only: `adev-`
+followed by 32 lower-case hex characters. IP addresses, hostnames, MACs, ports,
+URLs, sockets, transport objects, Android intent/API names, contact names,
+contact/database IDs, conversation IDs and message IDs are not tool arguments.
+There is no fallback to another device.
+
+`status` is read-only and returns only current capability/availability metadata:
+`available`, `mode: text`, and `send_supported`. It never exposes message
+history, conversations, notifications, contacts, callers, or message bodies.
+
+### Recipient and message validation
+
+A recipient is an explicit international E.164 phone number using the Phase 7
+canonicalization rule: it must start with `+`, contain 7–15 ASCII decimal
+digits after removing only spaces, hyphens and parentheses, and cannot start
+with zero. Its raw input is capped at 64 characters. `tel:`, `sms:`, `smsto:`,
+`mms:`, `sip:`, URLs, IPs, hostnames, local aliases, contact IDs, shell/ADB/CMD/
+PowerShell-like strings, controls and Unicode digit lookalikes are refused.
+
+A message is opaque, unmodified Unicode text. The same exact text is carried to
+the authenticated companion; JARVIS does not append signatures, rewrite links,
+expand templates, interpret code/commands/URLs/JSON, or alter its recipient.
+It is bounded by both **2,048 characters** and **4,096 UTF-8 bytes**. Empty or
+whitespace-only values, non-strings, malformed Unicode and C0/C1 control
+characters (including NUL, newline, escape and DEL) are refused. Normal Unicode
+letters and emoji are supported when the companion supports them. Command-like
+text remains ordinary text, not executable input.
+
+### Confirmation and privacy
+
+`android.message.send` is both `EXTERNAL_ACTION` and
+`confirmation_mandatory`; an operator `never_confirm` list cannot disable it.
+There is no `confirm`, retry, operation-ID or bypass parameter. The flow is:
+
+```
+request -> pending confirmation -> explicit approved=True -> one send attempt
+```
+
+The confirmation UI shows **Send message**, the selected `adev-...` device, the
+canonical recipient and the exact message body. The request stores and binds the
+exact tool, device, canonical recipient, untouched message, expiry and
+single-use state. A confirmation ID alone does nothing. Omitted/non-boolean
+approval, refusal, unknown ID, expiry, reuse, or changing the device,
+recipient, message or tool blocks execution.
+
+Recipient and body values are never written to ordinary audit events: manager
+events record only argument names; recipient/message keys are redacted as a
+defence in depth; and the confirmation diagnostic summary hides message-send
+confirmation targets. The explicit pending-confirmation UI is the sole
+intentional place the recipient and body are displayed. Normal success/failure
+results omit both values.
+
+### Capability, protocol, timeout and duplicate semantics
+
+Before a send frame can leave JARVIS, `AndroidMessageControl` validates the
+recipient/body/operation ID and requires a trusted, paired, non-revoked,
+connected and non-stale device that advertises **both** `message.status` and
+`message.send`. A stale session blocks status/send; only the pre-existing,
+authenticated read-only heartbeat may recover it.
+
+Protocol version 1 adds four explicit frames:
+
+* `message_status` / `message_status_response`
+* `message_send` / `message_send_response`
+
+A send payload contains only `recipient`, `message`, and a generated bounded
+`msgop-...` operation ID. It contains no key material, contacts, history,
+transport metadata or arbitrary destination. The operation ID is generated
+inside JARVIS, not supplied by the model; it is signed with the whole frame,
+bound to the device/session/request exchange, and is covered by the existing
+nonce/sequence/replay protections. The fake companion retains it with the
+first protected recipient/body, returns `duplicate: true` without a second send
+for an identical re-presentation, and rejects a conflicting reuse.
+
+Every request has a bounded bridge timeout. `android.message.send` is **never
+automatically retried**. A timeout reports that Android acceptance is unknown
+and explicitly says it was not resent. A companion may attest only one of
+`accepted`, `sent`, or `delivered`; the tool reports exactly that state. The
+default fake only returns `accepted`, meaning the Android messaging controller
+accepted the request — **not** that it was delivered. `failed` and `unknown`
+are never upgraded to successful delivery.
+
+Frames and responses remain strict: unexpected payload keys, unexpected/error
+values, mismatched operation IDs, wrong response/device/session, bad
+signatures, stale sequence/nonce/replays, malformed JSON and oversized frames
+are refused. There is no `execute`, `command`, `raw_message`, `send_raw`,
+arbitrary action/method, or Android intent frame.
+
+### Future companion and fake testing
+
+`AndroidMessageController` is the injectable future Android contract with only
+`get_status()` and `send(recipient, message, operation_id)`. A real companion
+must independently authenticate its paired host, enforce Android user
+permissions/policy and persist its duplicate-operation behavior appropriately.
+This repository does not implement Android SMS, RCS, MMS, desktop messaging or
+any network transport.
+
+`FakeAndroidMessageController` and `MessageCapablePhone` are deterministic
+in-memory tests layered on the actual Phase 5 signed protocol. The fake stores
+only the messages deliberately submitted by a test and exposes no tool for
+reading them. Tests cover Unicode/opaque content, recipient abuse, empty/control/
+size boundaries, capability and stale/revoked/disconnected/unpaired/unknown
+device gates, confirmation pending/approve/decline/expiry/reuse/migration,
+accepted/sent/delivered truthfulness, timeouts with no resend, operation-ID
+deduplication/conflict, forged/wrong-session/replayed requests, forged/wrong-
+device/replayed responses, malformed/oversized frames, payload minimization,
+private-key protection, audit redaction and real LiveKit metadata/invocation.
+
+**FAKE / IN-MEMORY TESTING: performed.**
+
+**REAL ANDROID TESTING: NOT PERFORMED.** No physical Android phone, Android
+companion application, Android permission prompt, carrier/SMS/RCS service or
+production transport was used. The fake companion is test infrastructure only
+and must not be represented as a real phone.
+
+### Deliberately absent
+
+There is no message/conversation/history scraping, contact database access,
+contact-name resolution, notification/SMS interception, monitoring, forwarding,
+automatic reply, mass/bulk messaging, recording, microphone/camera/location/
+file access, ADB, shell/process invocation, desktop-messaging fallback,
+arbitrary network destination, arbitrary Android API invocation or hidden retry.
+
+### Verification
+
+No dependency changed. `cryptography` and `livekit-agents` were already declared
+in `requirements.txt`; existing declarations were installed only into the
+ignored local `.venv` used for verification.
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t . -q  # 902 tests, 3 skipped
+.venv/bin/python -m pytest tests -q                     # 899 passed, 3 skipped
+.venv/bin/python -m compileall -q .
+git diff --check
+```
+
+The real LiveKit Phase 8 harness imports `livekit.agents.FunctionTool`, validates
+both wrapper signatures/metadata/no-duplicates, constructs a real `Agent`, and
+invokes the real send wrapper to prove an exact pending confirmation is produced
+before any registered action can execute.

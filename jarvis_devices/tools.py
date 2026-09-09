@@ -94,6 +94,9 @@ class BaseDeviceTool(ABC):
     #: the question, TTL and single use - this flag only removes the ability to
     #: opt the tool out via ``never_confirm``.
     confirmation_mandatory: bool = False
+    #: ``True`` when a caller supplied generic confirmation target must never
+    #: replace the tool's complete, user-safety-critical rendered target.
+    confirmation_target_mandatory: bool = False
     #: Declared arguments.
     argument_schema: ArgumentSchema = ArgumentSchema.empty()
 
@@ -129,7 +132,7 @@ class BaseDeviceTool(ABC):
 
         try:
             validated = self.normalize_arguments(validated)
-        except (TypeError, ValueError):
+        except Exception:  # noqa: BLE001 - normalizers are an untrusted input boundary
             return ToolResult.invalid_argument(
                 f"Invalid arguments for {self.name}.",
                 error_code=ErrorCode.INVALID_ARGUMENT,

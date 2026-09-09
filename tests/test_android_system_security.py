@@ -219,7 +219,7 @@ class RegistrationTests(unittest.TestCase):
         for name in ANDROID_SYSTEM_TOOL_NAMES:
             with self.subTest(tool=name):
                 self.assertEqual(names.count(name), 1)
-        self.assertEqual(len(bridge.device_registry.names()), 49)
+        self.assertEqual(len(bridge.device_registry.names()), 51)
 
     def test_the_builder_returns_thirteen_unique_tools(self) -> None:
         from jarvis_devices.android_bridge import create_default_android_bridge

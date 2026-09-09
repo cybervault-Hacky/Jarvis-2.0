@@ -57,6 +57,11 @@ from Jarvis_device_control import (
     android_call_reject,
     android_call_end,
 )
+# Phase 8: Android messaging stays on the authenticated device bridge.
+from Jarvis_device_control import (
+    android_message_status,
+    android_message_send,
+)
 load_dotenv()
 
 
@@ -128,7 +133,9 @@ class Assistant(Agent):
                             android_call_dial, #ये normalized number पर call request करता है - explicit confirmation हमेशा ज़रूरी है (Phase 7)
                             android_call_answer, #ये सिर्फ current incoming call answer करता है - confirmation policy लागू है (Phase 7)
                             android_call_reject, #ये सिर्फ current incoming call reject करता है - confirmation policy लागू है (Phase 7)
-                            android_call_end #ये सिर्फ current active call end करता है - confirmation policy लागू है (Phase 7)
+                            android_call_end, #ये सिर्फ current active call end करता है - confirmation policy लागू है (Phase 7)
+                            android_message_status, #ये trusted Android device की text-messaging capability बताता है (Phase 8)
+                            android_message_send #ये explicit recipient को exact text send request करता है - human confirmation हमेशा ज़रूरी है (Phase 8)
                          ]
                          )
 
