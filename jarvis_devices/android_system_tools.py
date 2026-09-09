@@ -93,6 +93,7 @@ _UNAVAILABLE_CODES = frozenset(
         ErrorCode.ANDROID_WIFI_UNAVAILABLE,
         ErrorCode.ANDROID_BLUETOOTH_UNAVAILABLE,
         ErrorCode.ANDROID_DEVICE_NOT_CONNECTED,
+        ErrorCode.ANDROID_DEVICE_STALE,
         ErrorCode.UNSUPPORTED_PLATFORM,
     }
 )

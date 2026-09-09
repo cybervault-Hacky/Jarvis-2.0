@@ -49,7 +49,7 @@ MAX_RECORDS = 100
 SENSITIVE_KEY_RE = re.compile(
     r"(?:^|[^a-zA-Z])(?:api[_-]?key|apikey|secret|token|password|passwd|pwd|credential|"
     r"authorization|auth[_-]?header|cookie|otp|cvv|pin|message|body|content|payload|text|"
-    r"phone|mobile|email|contact|address|location)",
+    r"phone|mobile|email|contact|recipient|address|location)",
     re.IGNORECASE,
 )
 
@@ -88,6 +88,12 @@ SAFE_KEYS = frozenset(
         "expires_at",
         "requested_at",
         "duration_ms",
+        # Phase 9 bounded-plan correlation and minimal device routing metadata.
+        # These ids/capability names are non-secret and contain no content,
+        # transport, address, display-name or key material.
+        "plan_id",
+        "device_id",
+        "capability",
     }
 )
 

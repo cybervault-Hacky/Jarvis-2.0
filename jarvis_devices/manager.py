@@ -148,6 +148,20 @@ class DeviceActionManager:
                     execution_id=execution_id,
                 )
             )
+        # Canonicalize before anything is stored for approval.  This is vital
+        # for destination-bearing tools: an approval binds the actual request,
+        # not merely an equivalent-looking presentation string.
+        try:
+            validated = tool.normalize_arguments(validated)
+        except Exception:  # noqa: BLE001 - normalizers are an untrusted input boundary
+            return self._log_failure(
+                ToolResult.invalid_argument(
+                    f"Invalid arguments for {tool.name}.",
+                    error_code=ErrorCode.INVALID_ARGUMENT,
+                    tool_name=tool.name,
+                    execution_id=execution_id,
+                )
+            )
 
         # 4 - permission check ----------------------------------------------
         decision = self.permissions.check(tool)
@@ -232,9 +246,17 @@ class DeviceActionManager:
     ) -> Optional[ToolResult]:
         """Return a blocking result, or ``None`` when execution may continue."""
         if not confirmation_id:
+            # Let a trusted tool render its own human-facing target.  The
+            # manager never logs this value; it is held only in the pending
+            # confirmation/UI so an explicit destination can be approved.
+            confirmation_target = (
+                tool.confirmation_target(validated)
+                if getattr(tool, "confirmation_target_mandatory", False)
+                else (target or tool.confirmation_target(validated))
+            )
             pending = self.confirmations.create(
                 tool.name,
-                target or tool.description,
+                confirmation_target,
                 arguments=validated,
                 risk_level=tool.risk_level,
             )
@@ -247,7 +269,7 @@ class DeviceActionManager:
                 expires_at=pending.expires_at.isoformat(),
             )
             prompt = (
-                f"{tool.description or tool.name} needs your confirmation before it runs. "
+                f"{confirmation_target} needs your confirmation before it runs. "
                 f"Nothing has happened yet. Confirmation id: {pending.confirmation_id}."
             )
             return ToolResult.pending_confirmation(
@@ -284,6 +306,17 @@ class DeviceActionManager:
             return ToolResult.failure(
                 f"Confirmation {confirmation_id!r} was created for {pending.action!r}, "
                 f"not for {tool.name!r}.",
+                error_code=ErrorCode.CONFIRMATION_MISMATCH,
+                tool_name=tool.name,
+                execution_id=execution_id,
+            )
+        # A confirmation is cryptographically unrelated to model input, so
+        # bind it explicitly to the full normalized argument mapping as well
+        # as the tool.  Without this check a caller could present a valid id
+        # for one device/destination while requesting another.
+        if pending.arguments != validated:
+            return ToolResult.failure(
+                "The confirmation was created for a different validated request; nothing was executed.",
                 error_code=ErrorCode.CONFIRMATION_MISMATCH,
                 tool_name=tool.name,
                 execution_id=execution_id,

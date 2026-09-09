@@ -1,17 +1,16 @@
+# Runtime dependency input for JARVIS-2.0.
+# Production Linux deployments install the reviewed, hash-locked requirements.lock
+# with --require-hashes. requirements.windows.lock is a draft companion only and
+# must not be deployed until it passes its documented native-Windows validation.
+# Keep this file as the human-reviewed direct dependency manifest and regenerate
+# locks with pip-compile in a controlled Python 3.11 build environment.
 livekit-agents
-livekit-plugins-openai
-livekit-plugins-silero
 livekit-plugins-google
 livekit-plugins-noise-cancellation
-langchain-community
 requests
 python-dotenv
-duckduckgo-search
-fuzzywuzzy
-pyautogui
-pynput
-python-Levenshtein
-pywin32
-pycaw
 cryptography
-livekit
+# The secure PC backends are Windows-specific; markers keep a clean Linux/macOS
+# test or agent environment from attempting to install unavailable wheels.
+pywin32; platform_system == "Windows"
+pycaw; platform_system == "Windows"

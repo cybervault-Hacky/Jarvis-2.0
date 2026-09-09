@@ -7,13 +7,12 @@ from livekit.plugins import (
     noise_cancellation,
 )
 from Jarvis_prompts import behavior_prompts, Reply_prompts
+from jarvis_runtime_config import validate_runtime_configuration
 from Jarvis_google_search import google_search, get_current_datetime
 from jarvis_get_whether import get_weather
-from Jarvis_window_CTRL import open, close, folder_file
-from Jarvis_file_opner import Play_file
-from keyboard_mouse_CTRL import move_cursor_tool, mouse_click_tool, scroll_cursor_tool, type_text_tool, press_key_tool, swipe_gesture_tool, press_hotkey_tool, control_volume_tool
-# Phase 1: secure device-tool framework (additive - existing tools unchanged)
-from Jarvis_device_control import device_action, device_confirmation
+# Phase 10 security boundary: unsafe legacy desktop/file/keyboard wrappers and
+# the generic action/confirmation dispatchers are intentionally not model tools.
+# Model-facing device control is limited to the fixed registered wrappers below.
 # Phase 2: PC application control (registered device tools, no shell execution)
 from Jarvis_device_control import list_open_applications, application_status, open_application, focus_application, close_application
 # Phase 3: PC system control (volume / mute / brightness / Wi-Fi / Bluetooth) - registered device tools, no shell
@@ -49,6 +48,21 @@ from Jarvis_device_control import (
     android_bluetooth_enable,
     android_bluetooth_disable,
 )
+# Phase 7: Android Calls. These remain registered device tools over the authenticated Phase 5 bridge.
+from Jarvis_device_control import (
+    android_call_status,
+    android_call_dial,
+    android_call_answer,
+    android_call_reject,
+    android_call_end,
+)
+# Phase 8: Android messaging stays on the authenticated device bridge.
+from Jarvis_device_control import (
+    android_message_status,
+    android_message_send,
+    cross_device_status,
+    cross_device_capabilities,
+)
 load_dotenv()
 
 
@@ -59,21 +73,10 @@ class Assistant(Agent):
                             google_search,
                             get_current_datetime,
                             get_weather,
-                            open, #ये apps ओपन करने के लिए हैं
-                            close, 
-                            folder_file, #ये folder ओपन करने के लिए है
-                            Play_file,  #ये file रन करने के लिए है जैसे कि MP4, MP3, PDF, PPT, img, png etc.
-                            move_cursor_tool, #ये cursor move करने के लिए है
-                            mouse_click_tool, #ये mouse click करने के लिए है
-                            scroll_cursor_tool, #ये cursor scroll करने के लिए है
-                            type_text_tool, #ये text type करने के लिए है
-                            press_key_tool, #ये key press करने के लिए है
-                            press_hotkey_tool, #ये hotkey press करने के लिए है
-                            control_volume_tool, #ये volume control करने के लिए है
-                            swipe_gesture_tool, #ये gesture wipe करने के लिए है 
-                            device_action, #ये registered device tools को secure तरीके से run करने के लिए है (Phase 1)
-                            device_confirmation, #ये sensitive device actions के लिए user confirmation के लिए है (Phase 1)
-                            list_open_applications, #ये currently open applications list करने के लिए है (Phase 2)
+                            # Phase 2+ fixed registered capability wrappers only.
+                            # No legacy filesystem/keyboard/mouse tool, generic
+                            # action dispatcher, or model-controlled confirmer.
+                            list_open_applications, #ये currently open applications list करने के लिए हैं (Phase 2)
                             application_status, #ये check करने के लिए है कि कोई app running है या नहीं (Phase 2)
                             open_application, #ये catalog में मौजूद app को open करने के लिए है (Phase 2)
                             focus_application, #ये किसी open window को front में लाने के लिए है (Phase 2)
@@ -115,12 +118,23 @@ class Assistant(Agent):
                             android_wifi_disable, #ये Android phone का Wi-Fi radio off करता है - confirmation मांगता है (Phase 6)
                             android_bluetooth_status, #ये Android phone का Bluetooth radio state बताता है (Phase 6)
                             android_bluetooth_enable, #ये Android phone का Bluetooth radio on करता है - confirmation मांगता है, कोई pairing नहीं (Phase 6)
-                            android_bluetooth_disable #ये Android phone का Bluetooth radio off करता है - confirmation मांगता है (Phase 6)
+                            android_bluetooth_disable, #ये Android phone का Bluetooth radio off करता है - confirmation मांगता है (Phase 6)
+                            android_call_status, #ये trusted Android phone की current call state बताता है (Phase 7)
+                            android_call_dial, #ये normalized number पर call request करता है - explicit confirmation हमेशा ज़रूरी है (Phase 7)
+                            android_call_answer, #ये सिर्फ current incoming call answer करता है - confirmation policy लागू है (Phase 7)
+                            android_call_reject, #ये सिर्फ current incoming call reject करता है - confirmation policy लागू है (Phase 7)
+                            android_call_end, #ये सिर्फ current active call end करता है - confirmation policy लागू है (Phase 7)
+                            android_message_status, #ये trusted Android device की text-messaging capability बताता है (Phase 8)
+                            android_message_send, #ये explicit recipient को exact text send request करता है - human confirmation हमेशा ज़रूरी है (Phase 8)
+                            cross_device_status, #केवल safe cross-device inventory/status; कोई action नहीं (Phase 9)
+                            cross_device_capabilities #केवल registered cross-device capabilities; कोई planner/executor नहीं (Phase 9)
                          ]
                          )
 
 
 async def entrypoint(ctx: agents.JobContext):
+    # Validate names only, before a LiveKit connection/session is attempted.
+    validate_runtime_configuration()
     session = AgentSession(
         llm=google.beta.realtime.RealtimeModel(
             voice="Charon"

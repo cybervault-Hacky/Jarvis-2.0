@@ -34,6 +34,7 @@ from jarvis_devices.android_system_tools import (
 )
 from jarvis_devices.enums import ToolResultStatus
 from jarvis_devices.errors import ErrorCode
+from jarvis_devices.permissions import PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL
 
 try:
     from .android_support import FakeAndroidDevice, RecordingAuditHook, requires_crypto
@@ -196,7 +197,7 @@ class StaticAuditTests(unittest.TestCase):
             with self.subTest(message_type=name):
                 for forbidden in (
                     "command", "execute", "shell", "adb", "run", "arbitrary",
-                    "raw", "eval", "invoke", "call", "method",
+                    "raw", "eval", "invoke", "method",
                 ):
                     self.assertNotIn(forbidden, name)
 
@@ -219,7 +220,8 @@ class RegistrationTests(unittest.TestCase):
         for name in ANDROID_SYSTEM_TOOL_NAMES:
             with self.subTest(tool=name):
                 self.assertEqual(names.count(name), 1)
-        self.assertEqual(len(bridge.device_registry.names()), 44)
+        # Phase 9 adds exactly two read-only cross-device inventory tools.
+        self.assertEqual(len(bridge.device_registry.names()), 53)
 
     def test_the_builder_returns_thirteen_unique_tools(self) -> None:
         from jarvis_devices.android_bridge import create_default_android_bridge
@@ -557,6 +559,14 @@ class ConfirmationSecurityTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self) -> None:
         self.did = "adev-" + "a" * 32
+        # Explicit trusted fixture grants; Phase 10 production startup is
+        # read-only by default.
+        bridge.grant_device_permission(PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL)
+        self.addCleanup(
+            bridge.device_permissions.revoke,
+            PERMISSION_ANDROID_SYSTEM_READ,
+            PERMISSION_ANDROID_SYSTEM_CONTROL,
+        )
 
     def payload(self, name):
         payload = {"device": self.did}

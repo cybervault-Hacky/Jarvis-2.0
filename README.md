@@ -1,7 +1,8 @@
 # Jarvis-2.0
 
-Voice based JARVIS assistant built on LiveKit Agents (Gemini realtime voice,
-Google search, weather, window/file control and keyboard/mouse control).
+Voice-based JARVIS assistant built on LiveKit Agents. Its current model-facing
+surface is a closed set of fixed informational and registered device-capability
+tools; legacy window/file/keyboard/mouse modules are not Agent-reachable.
 
 ---
 
@@ -1013,7 +1014,764 @@ Phase 3 tools, the 5 Phase 4 tools, the 6 Phase 5 tools and the 13 Phase 6 tools
 with every earlier tool still in the same order and each new tool appearing
 exactly once. The bridge registry holds 44 tools with no duplicates.
 
-**Out of scope (Phase 7+):** Android app control, Android power control, calls,
+**Out of scope after Phase 7:** Android app control, Android power control,
 messaging, notifications, contacts, files, screen capture, microphone, camera,
 location and any form of Android shell or ADB execution. None is implemented,
 reachable through a tool, or expressible in the protocol.
+
+
+---
+
+## Phase 7 — Android Calls
+
+Phase 7 adds a deliberately small, explicit call-management surface over the
+existing authenticated Android Device Bridge. It does **not** create another
+bridge, transport, permission subsystem, or confirmation subsystem.
+
+```
+JARVIS / LiveKit FunctionTool
+    |
+DeviceActionManager        validation, permission, confirmation, redacted audit
+    |
+AndroidCallControl         device / connection / capability / state gates
+    |
+AndroidDeviceBridge        Ed25519, session, request id, nonce, sequence, replay guard
+    |
+explicit Phase 7 frame  --> future Android companion (AndroidCallController)
+```
+
+### Supported tools
+
+| LiveKit tool | Registered device tool | Risk | Permission | Arguments |
+| --- | --- | --- | --- | --- |
+| `android_call_status` | `android.call.status` | `SAFE` | `device.android.call.read` | `device` |
+| `android_call_dial` | `android.call.dial` | `EXTERNAL_ACTION` | `device.android.call.control` | `device`, `phone_number` |
+| `android_call_answer` | `android.call.answer` | `EXTERNAL_ACTION` | `device.android.call.control` | `device` |
+| `android_call_reject` | `android.call.reject` | `EXTERNAL_ACTION` | `device.android.call.control` | `device` |
+| `android_call_end` | `android.call.end` | `EXTERNAL_ACTION` | `device.android.call.control` | `device` |
+
+All target arguments are a registered bridge identity only: `adev-` followed by
+32 lower-case hex characters. There is no IP address, hostname, MAC address,
+port, URL, socket, transport, contact, caller-history, call/session identifier,
+or Android method parameter. A call operation never falls back to a different
+device.
+
+`status` reports only current structured state: `idle`, `ringing`, `dialing`,
+`active`, `ending`, `failed`, or `unavailable`; optional direction is only
+`incoming`, `outgoing`, or `unknown`. It does not expose call content, audio,
+recording, contact data, or history.
+
+`answer` and `reject` are accepted only by the companion for its currently
+ringing incoming call. `end` is accepted only for its current active call. An
+idle `end` yields `android_call_no_active_call` and **does not report success**.
+
+### Phone-number validation and privacy
+
+`android_call_dial` accepts only an international E.164 destination:
+
+* a leading `+` is mandatory;
+* exactly 7–15 ASCII decimal digits remain after normalization, and the first
+  digit cannot be zero;
+* only spaces, ASCII hyphens, and parentheses are removable presentation
+  formatting;
+* maximum raw input length is 64 characters.
+
+URI schemes (`tel:`/`sip:`), local or ambiguous numbers, extensions, DTMF
+characters, URLs, IP addresses, hostnames, control characters, non-ASCII
+numerals, shell-like text, desktop/ADB-like text, and overlong input are
+rejected. Normalization removes only allowed presentation formatting and never
+changes destination digits.
+
+The full canonical number is sent only in the dedicated signed dial frame and
+shown in the explicit human confirmation target. Normal tool results do not
+repeat it; fake-controller records use a redacted suffix; audit events log only
+argument names and never number values. Invalid-number errors do not echo the
+submitted value.
+
+### Confirmation policy
+
+Dial is both `EXTERNAL_ACTION` **and `confirmation_mandatory`**. It cannot be
+opted out by an operator `never_confirm` list and no model-facing tool accepts a
+`confirm=False`/skip flag. Before a dial frame can be sent, the flow is:
+
+```
+request -> pending confirmation (device + canonical number + “Place call”) ->
+explicit approved=True -> one execution
+```
+
+The pending request stores the normalized tool, device id, canonical number,
+operation, and expiration under the existing confirmation manager. It is
+single-use. Reusing it, changing the number/device/tool, allowing it to expire,
+or declining it prevents execution. The generic `device_confirmation` wrapper
+now requires an explicit boolean `approved` argument: a confirmation ID alone
+cannot approve or execute anything.
+
+Answer, reject, and end are explicit external actions covered by the existing
+confirmation policy; deployments may configure that policy for them. They expose
+no caller or arbitrary call selector.
+
+### Call state and capability gates
+
+`AndroidCallState` and `CallStateMachine` allow only reviewable transitions,
+including `IDLE -> DIALING -> ACTIVE`, `DIALING -> FAILED`,
+`RINGING -> ACTIVE`, `RINGING -> IDLE`, `ACTIVE -> ENDING -> IDLE`, and
+explicit unavailable recovery. A peer-reported impossible transition is refused.
+Model input never selects a state or transition.
+
+Each operation first verifies, in order:
+
+1. trusted, paired, non-revoked `adev-...` identity;
+2. connected, non-stale bridge session (heartbeats alone may recover a stale
+   session; state-changing calls cannot use it);
+3. advertised capability for the specific operation;
+4. authenticated dedicated request/response exchange.
+
+Capabilities are operation-specific: `call.status`, `call.dial`, `call.answer`,
+`call.reject`, and `call.end`. Advertisement means only that the phone claims
+support; a signed, validated response determines the outcome. Errors distinguish
+unsupported, unavailable, permission denied, invalid state/argument, timeout,
+and failed outcomes.
+
+### Protocol and authentication
+
+Protocol version 1 now includes exactly five allowlisted pairs:
+
+* `call_status` / `call_status_response`
+* `call_dial` / `call_dial_response`
+* `call_answer` / `call_answer_response`
+* `call_reject` / `call_reject_response`
+* `call_end` / `call_end_response`
+
+The dial payload is only `{"phone_number": "<canonical E.164>"}`; device,
+request ID, session ID, sequence, timestamp, nonce, and signature remain the
+existing authenticated frame fields. Call response envelopes are strict: unknown
+fields, unknown status/direction/error values, inconsistent state data, forged
+responses, wrong device/session, replays, malformed JSON, and oversized frames
+are refused. There is no generic command, raw telephony, arbitrary method, or
+arbitrary destination message type.
+
+Every operation has a bounded bridge timeout. Dial, answer, reject, and end are
+never automatically retried after an unanswered request, because success is then
+uncertain and a retry could duplicate or change a call.
+
+### Companion abstraction and fake testing
+
+`AndroidCallController` is the injectable five-method contract for a future
+Android companion: `get_status`, `dial`, `answer`, `reject`, and `end`. This
+repository does not implement Android telephony. The deterministic
+`FakeAndroidCallController` and `CallCapablePhone` test peer use the real Phase 7
+protocol over the in-memory Phase 5 transport and independently enforce trusted
+host signature, session, monotonic sequence, capability, and state checks.
+
+The fake tests cover status; dial-to-dialing-to-active; incoming answer/reject;
+active end; idle end; device/companion failures; timeout with no retry;
+unknown/unpaired/revoked/disconnected/stale device gates; capabilities; forged
+and replayed frames; wrong session/device; malformed and oversized frames;
+phone-number injection cases; confirmation pending/approval/rejection/expiry/
+reuse/migration; audit redaction; and LiveKit FunctionTool metadata/invocation.
+
+**FAKE / IN-MEMORY TESTING: performed.**
+
+**REAL ANDROID TESTING: NOT PERFORMED.** No physical Android phone, companion
+application, Android permission prompt, cellular carrier, or production
+transport was available. The fake companion is test infrastructure only and must
+not be represented as a real phone.
+
+### Security hardening discovered during integration
+
+* The generic confirmation gate previously checked a confirmation's tool name,
+  but did not compare stored validated arguments with a manually supplied
+  confirmation request. It now canonicalizes before confirmation and rejects a
+  mismatched argument mapping. This prevents any confirmed operation — including
+  a dial — from migrating to another device or destination.
+* The new stale-session action gate initially also blocked the read-only
+  heartbeat that is required to prove recovery. Heartbeats now use the existing
+  authenticated internal request primitive after checking paired + connected,
+  while all state-changing operations remain blocked until heartbeat health is
+  restored.
+
+### Deliberately absent
+
+No call interception, recording, spying, hidden monitoring, microphone access,
+call-content access, contact scraping, background/silent dialing, permission
+bypass, Android confirmation bypass, ADB, shell/process invocation, arbitrary
+network destination, desktop telephony fallback, arbitrary Android API method,
+or toggle/retry operation exists. Phase 8's separate narrow text-message tools
+do not add any call capability.
+
+### Verification
+
+No repository dependency changed; `cryptography` and `livekit-agents` were
+already declared in `requirements.txt`. The test environment installed those
+existing requirements in an ignored local virtual environment for verification.
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t . -q  # 865 tests, 3 skipped
+.venv/bin/python -m pytest tests -q                     # 862 passed, 3 skipped
+.venv/bin/python -m compileall -q .                     # clean
+```
+
+The real LiveKit harness imports `livekit.agents.FunctionTool`, verifies all five
+Phase 7 wrappers are genuine FunctionTool objects with exact signatures and
+metadata, and invokes the real dial wrapper to prove it produces a pending
+explicit confirmation before any registered action runs.
+
+
+---
+
+## Phase 8 — Android Messaging
+
+Phase 8 adds a deliberately narrow Android **text messaging** surface using the
+same authenticated Phase 5 `AndroidDeviceBridge`, `DeviceActionManager`,
+permission policy, confirmation manager, trusted `adev-...` identity model and
+versioned protocol used by Phases 5–7. It does not add a transport, listener,
+network destination, telephony implementation, contact resolver or general
+messaging engine.
+
+```
+JARVIS / LiveKit FunctionTool
+    |
+DeviceActionManager       validation, permission, explicit confirmation, redacted audit
+    |
+AndroidMessageTool        exact device + recipient + opaque message validation
+    |
+AndroidMessageControl     bridge freshness + message.status + message.send capability gates
+    |
+AndroidDeviceBridge       Ed25519, session, request id, nonce, sequence, replay guard
+    |
+explicit Phase 8 frame --> future Android companion (AndroidMessageController)
+```
+
+### Supported tools and permissions
+
+| LiveKit tool | Registered device tool | Risk | Permission | Arguments |
+| --- | --- | --- | --- | --- |
+| `android_message_status` | `android.message.status` | `SAFE` | `device.android.message.read` | `device` |
+| `android_message_send` | `android.message.send` | `EXTERNAL_ACTION` | `device.android.message.send` | `device`, `recipient`, `message` |
+
+All operations target one registered trusted bridge identity only: `adev-`
+followed by 32 lower-case hex characters. IP addresses, hostnames, MACs, ports,
+URLs, sockets, transport objects, Android intent/API names, contact names,
+contact/database IDs, conversation IDs and message IDs are not tool arguments.
+There is no fallback to another device.
+
+`status` is read-only and returns only current capability/availability metadata:
+`available`, `mode: text`, and `send_supported`. It never exposes message
+history, conversations, notifications, contacts, callers, or message bodies.
+
+### Recipient and message validation
+
+A recipient is an explicit international E.164 phone number using the Phase 7
+canonicalization rule: it must start with `+`, contain 7–15 ASCII decimal
+digits after removing only spaces, hyphens and parentheses, and cannot start
+with zero. Its raw input is capped at 64 characters. `tel:`, `sms:`, `smsto:`,
+`mms:`, `sip:`, URLs, IPs, hostnames, local aliases, contact IDs, shell/ADB/CMD/
+PowerShell-like strings, controls and Unicode digit lookalikes are refused.
+
+A message is opaque, unmodified Unicode text. The same exact text is carried to
+the authenticated companion; JARVIS does not append signatures, rewrite links,
+expand templates, interpret code/commands/URLs/JSON, or alter its recipient.
+It is bounded by both **2,048 characters** and **4,096 UTF-8 bytes**. Empty or
+whitespace-only values, non-strings, malformed Unicode and C0/C1 control
+characters (including NUL, newline, escape and DEL) are refused. Normal Unicode
+letters and emoji are supported when the companion supports them. Command-like
+text remains ordinary text, not executable input.
+
+### Confirmation and privacy
+
+`android.message.send` is both `EXTERNAL_ACTION` and
+`confirmation_mandatory`; an operator `never_confirm` list cannot disable it.
+There is no `confirm`, retry, operation-ID or bypass parameter. The flow is:
+
+```
+request -> pending confirmation -> explicit approved=True -> one send attempt
+```
+
+The confirmation UI shows **Send message**, the selected `adev-...` device, the
+canonical recipient and the exact message body. The request stores and binds the
+exact tool, device, canonical recipient, untouched message, expiry and
+single-use state. A confirmation ID alone does nothing. Omitted/non-boolean
+approval, refusal, unknown ID, expiry, reuse, or changing the device,
+recipient, message or tool blocks execution.
+
+Recipient and body values are never written to ordinary audit events: manager
+events record only argument names; recipient/message keys are redacted as a
+defence in depth; and the confirmation diagnostic summary hides message-send
+confirmation targets. The explicit pending-confirmation UI is the sole
+intentional place the recipient and body are displayed. Normal success/failure
+results omit both values.
+
+### Capability, protocol, timeout and duplicate semantics
+
+Before a send frame can leave JARVIS, `AndroidMessageControl` validates the
+recipient/body/operation ID and requires a trusted, paired, non-revoked,
+connected and non-stale device that advertises **both** `message.status` and
+`message.send`. A stale session blocks status/send; only the pre-existing,
+authenticated read-only heartbeat may recover it.
+
+Protocol version 1 adds four explicit frames:
+
+* `message_status` / `message_status_response`
+* `message_send` / `message_send_response`
+
+A send payload contains only `recipient`, `message`, and a generated bounded
+`msgop-...` operation ID. It contains no key material, contacts, history,
+transport metadata or arbitrary destination. The operation ID is generated
+inside JARVIS, not supplied by the model; it is signed with the whole frame,
+bound to the device/session/request exchange, and is covered by the existing
+nonce/sequence/replay protections. The fake companion retains it with the
+first protected recipient/body, returns `duplicate: true` without a second send
+for an identical re-presentation, and rejects a conflicting reuse.
+
+Every request has a bounded bridge timeout. `android.message.send` is **never
+automatically retried**. A timeout reports that Android acceptance is unknown
+and explicitly says it was not resent. A companion may attest only one of
+`accepted`, `sent`, or `delivered`; the tool reports exactly that state. The
+default fake only returns `accepted`, meaning the Android messaging controller
+accepted the request — **not** that it was delivered. `failed` and `unknown`
+are never upgraded to successful delivery.
+
+Frames and responses remain strict: unexpected payload keys, unexpected/error
+values, mismatched operation IDs, wrong response/device/session, bad
+signatures, stale sequence/nonce/replays, malformed JSON and oversized frames
+are refused. There is no `execute`, `command`, `raw_message`, `send_raw`,
+arbitrary action/method, or Android intent frame.
+
+### Future companion and fake testing
+
+`AndroidMessageController` is the injectable future Android contract with only
+`get_status()` and `send(recipient, message, operation_id)`. A real companion
+must independently authenticate its paired host, enforce Android user
+permissions/policy and persist its duplicate-operation behavior appropriately.
+This repository does not implement Android SMS, RCS, MMS, desktop messaging or
+any network transport.
+
+`FakeAndroidMessageController` and `MessageCapablePhone` are deterministic
+in-memory tests layered on the actual Phase 5 signed protocol. The fake stores
+only the messages deliberately submitted by a test and exposes no tool for
+reading them. Tests cover Unicode/opaque content, recipient abuse, empty/control/
+size boundaries, capability and stale/revoked/disconnected/unpaired/unknown
+device gates, confirmation pending/approve/decline/expiry/reuse/migration,
+accepted/sent/delivered truthfulness, timeouts with no resend, operation-ID
+deduplication/conflict, forged/wrong-session/replayed requests, forged/wrong-
+device/replayed responses, malformed/oversized frames, payload minimization,
+private-key protection, audit redaction and real LiveKit metadata/invocation.
+
+**FAKE / IN-MEMORY TESTING: performed.**
+
+**REAL ANDROID TESTING: NOT PERFORMED.** No physical Android phone, Android
+companion application, Android permission prompt, carrier/SMS/RCS service or
+production transport was used. The fake companion is test infrastructure only
+and must not be represented as a real phone.
+
+### Deliberately absent
+
+There is no message/conversation/history scraping, contact database access,
+contact-name resolution, notification/SMS interception, monitoring, forwarding,
+automatic reply, mass/bulk messaging, recording, microphone/camera/location/
+file access, ADB, shell/process invocation, desktop-messaging fallback,
+arbitrary network destination, arbitrary Android API invocation or hidden retry.
+
+### Verification
+
+No dependency changed. `cryptography` and `livekit-agents` were already declared
+in `requirements.txt`; existing declarations were installed only into the
+ignored local `.venv` used for verification.
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t . -q  # 902 tests, 3 skipped
+.venv/bin/python -m pytest tests -q                     # 899 passed, 3 skipped
+.venv/bin/python -m compileall -q .
+git diff --check
+```
+
+The real LiveKit Phase 8 harness imports `livekit.agents.FunctionTool`, validates
+both wrapper signatures/metadata/no-duplicates, constructs a real `Agent`, and
+invokes the real send wrapper to prove an exact pending confirmation is produced
+before any registered action can execute.
+
+---
+
+## Phase 9 — Cross-Device Intelligence & Secure Orchestration
+
+Phase 9 adds a narrow, **capability-allowlisted orchestration layer** above the
+existing device framework. It does not introduce remote control, a second bridge,
+a device discovery service, a scheduler, a transport, or a generic executor.
+Its only role is to make a privacy-minimized inventory, bind an internal
+short-lived plan to one registered action and one resolved device, and hand that
+unchanged request back to the existing `DeviceActionManager`.
+
+```
+intent / application request
+    |
+CrossDevicePlanner             inventory + capability/device resolution; no execution
+    |
+immutable plan-...             bounded in-memory binding, not an authorization token
+    |
+final revalidation             registry + arguments + permission + confirmation policy
+    |                           + Android trust/connection/freshness/capability state
+    v
+DeviceActionManager.request()  existing schema -> permission -> adapter -> confirmation
+    |
+registered tool only           existing PC implementation OR authenticated Android bridge
+```
+
+### Safe inventory and capability source
+
+The on-demand inventory contains only:
+
+* canonical id (`pc-local` for the one host on which JARVIS runs, or the existing
+  Android `adev-` + 32 lowercase-hex identity), platform, trust state,
+  connection state, freshness and availability;
+* registered **tool-name** capabilities and their currently available subset.
+
+It deliberately excludes display names, public-key fingerprints, keys, pairing
+secrets, raw advertised protocol payloads, transport names, endpoint/address
+metadata, timestamps, contacts, calls, messages, notifications and history.
+It does not poll or monitor anything: each status request reads the existing
+registry/heartbeat state once.
+
+There is no remote-PC registry in the existing architecture, so Phase 9 reports
+only `pc-local`. It cannot claim a LAN, nearby, paired, named, or remote PC is
+controllable. Android entries retain their bridge-issued IDs; Phase 9 does not
+invent another Android identifier scheme.
+
+Capabilities come from the registered tool registry plus the existing Android
+bridge's current signed/paired capability state. `ANDROID_TOOL_CAPABILITY_POLICY`
+is a deliberately finite immutable binding from the pre-existing Android tool
+names to their pre-existing Phase 5–8 protocol capabilities (for example,
+`android.message.send` requires both `message.status` and `message.send`). It
+is not a capability generator or dispatch mechanism. The local-PC side is
+likewise a closed allowlist of existing Phase 2–4 PC tool names: registering a
+future arbitrary `pc.*` tool does not make it cross-device routable. Unknown
+tools, unknown capability bindings, unregistered tools and unadvertised Android
+capabilities fail closed. Tests pin the table and all routable Android
+operations.
+
+### Selection and routing policy
+
+* A supplied canonical device id is absolute: Phase 9 checks **only** it. A
+  revoked, stale, disconnected, unavailable or unsupported explicit target
+  returns a structured failure—never a fallback or migration.
+* With exactly one eligible target, that target is selected.
+* Multiple eligible targets are an explicit ambiguity for every non-read-only
+  operation. The caller must select a canonical id.
+* A read-only `SAFE` operation may use canonical-id lexical selection only when
+  its internal caller explicitly sets `allow_read_fallback=True`. It never uses
+  a display name, proximity, network/address data, previous target or any hidden
+  preference.
+* One plan means one tool and one device. There is no external-action fan-out,
+  retry, failover or automatic migration. Per-device failures stay isolated.
+
+Eligibility requires registry presence, tool availability, registered capability,
+permission policy, and (for Android) a non-revoked privileged bridge state,
+connected/fresh health, and the operation-specific advertised capability.
+`connected` alone does not make any action safe.
+
+### Plans, final checks and confirmation
+
+A plan has a non-secret `plan-...` correlation id, immutable tool/device/platform/
+risk/permission/confirmation metadata, canonical normalized arguments, an
+inventory-state token and a maximum five-minute lifetime (capped at ten minutes
+for custom callers). At most 64 plans are held in memory; no plan is persisted
+or renewed. Argument values are retained only for that bounded interval so the
+existing manager can bind a confirmation to the exact normalized request. They
+are omitted from plan summaries, inventory, audit events and the model-facing
+surface.
+
+Planning never executes. Submission atomically consumes the plan, validates the
+registered tool, tool policy, normalized arguments, permission state, confirmation
+requirement, availability and current inventory state twice immediately before
+the sole call to `DeviceActionManager.request()`. A changed/removed tool,
+permission, confirmation requirement, trust/revocation, connection/freshness,
+capability or argument normalizer invalidates the plan. Expired, replayed and
+invalidated plans cannot submit.
+
+The manager remains authoritative after that handoff, and Android controls/bridge
+repeat their own trust/capability/session checks. Phase 9 never grants a
+permission, changes pairing/trust/revocation, makes a confirmation decision,
+passes a confirmation id, weakens the Phase 7/8 exact argument binding, or calls
+a bridge/PC backend directly. An external action therefore still returns the
+existing pending confirmation and cannot run until the existing confirmed,
+single-use request is resolved.
+
+### LiveKit surface
+
+Only two new read-only, registered `FunctionTool`s are available to the model:
+
+| LiveKit tool | Registered device tool | Purpose |
+| --- | --- | --- |
+| `cross_device_status` | `cross.device.status` | Minimal safe inventory state |
+| `cross_device_capabilities` | `cross.device.capabilities` | Registered/currently available capabilities per device |
+
+Both use `DeviceActionManager` and `device.status.read`; neither accepts device
+or action arguments, creates a plan, executes a plan, discovers a device, or
+changes state. There is intentionally **no** model-facing `cross.device.plan`,
+`cross.device.execute`, generic capability/action/method endpoint, or plan-id
+executor. Internal application code can use `CrossDevicePlanner` only for a
+previously registered, policy-routable tool, and submission still delegates to
+the manager.
+
+### Audit, privacy and concurrency
+
+Phase 9 adds redacted lifecycle events for plan creation, submission, pending
+confirmation, completion, failure and invalidation. They contain only plan id,
+canonical device id, tool capability, risk, status/error and argument **names**;
+not values. A lock-protected bounded plan store makes concurrent submission
+single-use. Inventory collection handles a malformed/broken individual bridge
+record without hiding other records. It does not cache or aggregate personal
+content and never silently retries a device failure.
+
+No surveillance, background polling, contact/call/message/history scraping,
+notification access, location/audio/video/screen collection, forwarding,
+automated reply, bulk operation, shell/CMD/PowerShell/ADB/subprocess path,
+arbitrary Android API, dynamic import/eval/exec, socket listener or unrestricted
+network destination was added.
+
+### Testing and limitations
+
+The Phase 9 suite covers local-PC truthfulness, Android canonical identity,
+registry/capability derivation, explicit-target no-fallback behavior, safe
+ambiguity policy, immutable/redacted plans, expiry/replay/capacity behavior,
+permission/registry/confirmation-policy changes, revocation/capability downgrade,
+manager-only handoff, concurrent submission and model-facing read-only tools.
+Existing suite expectations were extended to account for exactly two additional
+registered read-only tools; Phase 1–8 security boundaries remain covered.
+
+**FAKE / IN-MEMORY AND REAL LIVEKIT TESTING:** The existing real `FunctionTool`
+integration path imports Phase 9's two wrappers into the actual `Agent` tool list.
+Android planner tests use real bridge identity/capability/health code over
+in-memory test state; they do not simulate a physical phone action.
+
+**REAL DEVICE TESTING: NOT PERFORMED.** No physical Android companion, remote
+PC, production Android transport, carrier/telephony/messaging service, or real
+Windows control backend was introduced or exercised. `pc-local` is the local
+host only; Phase 9 is not evidence of remote-PC support.
+
+**Dependencies and environment:** no dependency, `requirements.txt`, `.env`,
+credential or transport configuration changed. Verification uses the ignored
+project `.venv` only.
+
+### Verification
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t . -q
+.venv/bin/python -m pytest tests -q
+.venv/bin/python -m compileall -q .
+git diff --check
+```
+
+---
+
+# Phase 10 — Final Security, Performance, E2E & Production Certification
+
+> **Current authoritative release status (2026-09-09): BLOCKED — do not release or
+> describe this checkout as production-secure.** Earlier phase sections are historical
+> implementation notes. This section supersedes their Agent inventory, dependency,
+> configuration and verification claims where they differ.
+
+## Current architecture and trust boundaries
+
+```
+user voice/text and untrusted model output
+    -> exact closed LiveKit FunctionTool inventory (55 fixed names)
+    -> fixed wrapper and registered capability name
+    -> DeviceActionManager
+         registry lookup -> schema/normalization -> permission policy
+         -> confirmation policy + trusted human/UI decision -> platform adapter
+    -> local PC backend OR authenticated Android bridge
+         Android identity/trust/revocation/session/freshness/capability/replay checks
+    -> operating-system API or future trusted Android companion
+```
+
+There is no model-facing generic dispatcher, confirmation resolver, shell,
+command/API/method argument, planner executor, arbitrary Android API, arbitrary
+network destination, or transport bypass. `device_action` and
+`device_confirmation` are undecorated compatibility coroutines for a **trusted
+application/UI** only; they are not in `Assistant().tools`. A deployment that
+has no trusted confirmation UI cannot safely complete external/destructive
+requests: they remain pending rather than being auto-approved.
+
+The manager remains the only device-action execution path. The Phase 9 planner
+only accepts the finite PC/Android capability mappings, creates bounded immutable
+plans, consumes them once, revalidates registry/arguments/permissions/
+confirmation/device state immediately before hand-off, and delegates once to the
+manager. It never migrates, retries, fans out, grants permission, approves a
+confirmation, or calls a backend/bridge itself. Explicit targets never fall
+back; only an expressly enabled SAFE read path can use documented deterministic
+selection.
+
+## Closed-world inventories
+
+The complete 53-entry registry inventory and exact 55-entry actual LiveKit Agent
+inventory, including host platform, route/capability, permission, risk,
+confirmation requirement and target requirement, are in
+[`docs/PHASE10_INVENTORY.md`](docs/PHASE10_INVENTORY.md). They are generated from
+the inspected live registry during verification and pinned by
+`tests/test_phase10_inventory.py`.
+
+The registry platform is the host executing a tool. Android rows therefore show
+`pc`: the host wrapper sends a fixed, authenticated protocol operation and still
+requires a canonical bridge-issued `adev-...` target. It is not a claim that an
+Android device is a PC, or that the host can route to arbitrary hardware.
+
+## Security controls verified
+
+* **Hostile model/user data:** closed tool names, strict schemas, canonical Android
+  IDs and E.164 recipient validation reject unknown fields, command-like data,
+  raw methods, host/address/URL inputs, malformed JSON and oversized data before
+  dispatch. Message bodies stay opaque and bounded; they are never interpreted.
+* **Permission and confirmation:** permission is checked before confirmation and
+  execution; denied requests do not contact a backend. External/destructive tools
+  require a confirmation under the effective policy; dial/message send and power
+  retain mandatory binding. Confirmation requests expire, are single-use and bind
+  tool, normalized arguments and target; changing any item, replaying a yes, or
+  migrating devices fails.
+* **Android trust and protocol:** Android operations require a registered canonical
+  identity plus current trust/revocation, pairing, connection, freshness and
+  operation-specific advertised capability. The existing Ed25519 protocol binds
+  device/session/request/nonce/sequence and rejects forged, stale, malformed,
+  oversized and replayed frames. No installed network listener or Android
+  transport exists; the repository's transport is queue-based in-memory testing.
+* **Timeouts and recovery:** bridge timeouts are honest unknown/not-executed
+  outcomes and message send has no automatic resend. Reads and actions are gated
+  separately; a stale Android session blocks operations until the existing
+  authenticated heartbeat establishes recovery.
+* **Privacy:** inventories omit keys, endpoint/address/transport data, display
+  names, contacts, messages, calls, notification/history and argument values.
+  Audit records carry IDs, status and argument names only; protected phone/message
+  values are redacted. Search results are labelled untrusted reference data and
+  never authorize another tool call.
+* **Resource bounds:** argument schemas, protocol frame sizes, request timeouts,
+  confirmation capacity/expiry, plan capacity/expiry, result counts and text byte
+  limits are bounded. There is no polling loop or persistent personal-data cache.
+
+### Static-dangerous-construct classification
+
+The complete production Python tree was AST- and source-audited by
+`tests/test_phase10_static_audit.py`.
+
+| Construct/location | Classification | Context and disposition |
+| --- | --- | --- |
+| `requests.get` in `Jarvis_google_search.py`, `jarvis_get_whether.py` | SAFE | Only source-defined HTTPS Google Custom Search/OpenWeather destinations; bounded data, 10-second timeout, no raw provider body/exception reflection. |
+| `os.getenv` in search/weather and `os.environ` in `jarvis_runtime_config.py` | SAFE | Reads runtime configuration only; values are never returned or logged. |
+| `asyncio`, queue transport and locks in framework | SAFE | Manager/bridge timeout, concurrency and in-memory test transport support; no socket listener. |
+| `subprocess` / `os.startfile` in `Jarvis_file_opner.py`, `Jarvis_window_CTRL.py` | LEGACY-UNREACHABLE | These old filesystem/window modules are not imported or registered by `agent.py`; their wrappers are absent from the actual Agent inventory. They remain technical debt and are not a supported deployment interface. |
+| GUI input/temporary activation in `keyboard_mouse_CTRL.py` | LEGACY-UNREACHABLE | Not imported or registered by the Agent; no current capability path reaches it. |
+| `pickle` and process mocks in `tests/` | TEST-ONLY | Negative protocol/deserialization and no-spawn tests only; not production imports. |
+| `eval`, `exec`, dynamic import, unsafe deserializer, `socket`, listener, `ctypes` production imports | SAFE | No production occurrence; Phase 10 AST test fails on any of these imports/calls. |
+
+The legacy-unreachable rows are deliberately disclosed rather than treated as
+secure functionality. Their continued presence is not a release-quality reason
+to re-enable them.
+
+## Network, dependencies and configuration
+
+Outbound behavior in this repository is limited to: (1) the LiveKit/Google
+realtime libraries configured by the deployment's LiveKit/Google credentials,
+and (2) optional fixed HTTPS calls to the two source constants above. Search
+requires `GOOGLE_SEARCH_API_KEY` and `SEARCH_ENGINE_ID`; weather requires
+`OPENWEATHER_API_KEY`. Missing optional settings return an explicit unavailable
+result without a request. Weather requires an explicit city and makes no IP
+geolocation request. The Android bridge ships with no network listener,
+discovery service or production transport.
+
+Copy `.env.example` to a local ignored `.env` or use a secret manager; never
+commit populated values. The worker additionally needs `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and `GOOGLE_API_KEY`. The current
+process singleton starts with only `device.status.read`; it grants no control,
+pairing, call, or message permission at import time. A trusted host/UI
+integration must explicitly grant the smallest needed permission with
+`grant_device_permission()` for its own session/deployment policy. That helper
+is not model-facing, and confirmation independently gates external/destructive
+operations. **This repository does not provide a trusted human-confirmation UI
+integration.** The Agent exposes no confirmation resolver; without such a host
+integration, sensitive requests remain pending until expiry/cancellation and
+must not execute. `jarvis_runtime_config.validate_runtime_configuration()` checks
+the required worker setting names before `entrypoint` opens a LiveKit session,
+never including values in an error. Model instructions must never be used to
+grant permissions or approve confirmations.
+
+`requirements.txt` is the human-reviewed direct runtime dependency input and
+preserves Windows markers for `pywin32`/`pycaw`. `requirements.lock` is the
+generated Python 3.11 production Linux transitive lock with exact versions and
+hashes; install it with `--require-hashes`. `requirements.test.in` and its
+generated `requirements.test.lock` are the separate non-shipping, hashed Python
+3.11 verification-tool lock (`pip-audit` and `pip-tools`), installed only after
+the runtime lock. The project tests themselves use the standard-library
+`unittest` runner and do not add a runtime dependency. `requirements.windows.lock`
+is only a manually assembled CPython 3.11/win_amd64 wheel-hash companion for the
+Windows-only packages; it was not produced by a successful cross-platform
+resolver or installed on Windows, so it is **not release-certified** and must
+not be deployed until native validation is recorded. A fresh Python 3.11 Linux
+virtual environment installed both runtime and verification locks with `pip check`
+succeeding. `pip-audit -r requirements.lock` returned **No known vulnerabilities found** on
+2026-09-09. Locks must be regenerated in a reviewed build environment whenever
+the corresponding direct manifest changes.
+
+### Startup (after the release blockers below are cleared)
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r requirements.lock
+# Verification only (not shipped with the worker):
+.venv/bin/python -m pip install --require-hashes -r requirements.test.lock
+# Do not deploy requirements.windows.lock until its documented native-Windows
+# validation gate has passed.
+cp .env.example .env                    # populate only through local secret handling
+.venv/bin/python agent.py start         # use the appropriate LiveKit worker CLI deployment command
+```
+
+Use a Windows deployment for actual PC backends. This Linux verification host
+has no supported Windows control backend, physical Android device, carrier,
+Android companion or production Android transport.
+
+## Phase 10 E2E matrix and actual evidence
+
+| Path | Evidence | Result / scope |
+| --- | --- | --- |
+| Actual Agent registration | `test_phase10_inventory` constructs real installed `livekit.agents.Agent` / `FunctionTool` | 55 exact fixed tools; generic dispatch and model confirmation excluded. |
+| Manager success/denial/confirmation | Phase 1–4 manager, permission, confirmation, PC tests | Passed in-memory/fake backend matrix; no Windows hardware action on this Linux host. |
+| Android identity/pairing/protocol/replay/stale/recovery | Phase 5–8 Android bridge/protocol/security suites | Passed real repository crypto/protocol code over queue-based fake peers; not a network or physical-phone test. |
+| Call action | `test_phase10_e2e` | Signed fake-peer status then pending exact dial then one trusted confirmation/execution; confirmation replay rejected. |
+| Message action | `test_phase10_e2e` | Permission-denied path sends nothing; exact canonical recipient/body is accepted once only after confirmation. |
+| Planner TOCTOU, revoke/capability/permission change, expiry, replay, concurrency | Phase 9 `test_cross_device` suite | Passed with in-memory managers/bridges; no migration/fallback/fan-out. |
+| Fixed HTTP failure/privacy behavior | `test_phase10_network` | Mocked fixed-destination calls verify timeouts, missing config, invalid input/provider data and non-reflection; no real HTTP performed. |
+| Static/network surface | `test_phase10_static_audit` | Passed; only classified fixed HTTP and unreachable legacy subprocess imports remain. |
+
+**Real LiveKit classes:** exercised locally by real installed classes and real
+FunctionTool registration/invocation wrappers. **In-memory/fake:** all device,
+Android transport, companion, PC backend and E2E action tests. **Real hardware,
+carrier/network Android transport and real Windows platform actions:** **NOT
+PERFORMED**. This distinction is mandatory: passing fake tests is not a claim of
+physical-device or production-network certification.
+
+## Release gate and limitations
+
+**BLOCKED.** Recovery found the verified Phase 7→9 branch lineage carries an
+older tracked `.env` blob with the listed credential names but empty values.
+However, the configured remote's `main` history contains non-empty values in
+`57d26a5` and `8a2de20`; the original credential strings are recoverable from
+those reachable remote commits. Phase 10 removes `.env` from the current tip's
+index, adds ignore rules and an empty template, but cannot revoke exposed
+credentials or rewrite remote/main history. Treat every value ever present there
+as compromised: rotate/revoke the LiveKit, Google, and OpenWeather credentials,
+remove the secret from every retained/ref/mirror history using the repository owner's
+approved history-remediation process, force-push only under that coordinated
+process, and verify with a fresh secret scan before release.
+
+Until that is complete, **JARVIS-2.0 v1.0 is not certified or tagged**. A
+reviewed hash-locked production dependency policy, a trusted confirmation/UI
+integration, and real target-environment/hardware validation are also required
+before making any production-security claim. No Phase 11 is proposed.
+
+### Local non-hardware performance measurement (2026-09-09)
+
+On this Linux/Python 3.11 verification host, with a harmless in-memory SAFE
+registered tool and no network/hardware I/O, actual timing was: 1,000
+`DeviceActionManager.request()` calls in **0.075891 s** (**0.076 ms/request**);
+64 bounded `CrossDevicePlanner` create+submit calls in **0.011634 s**
+(**0.182 ms/plan**; 64 is the intentional store capacity); and 100 actual
+LiveKit `Assistant()` constructions in **0.006950 s** (**0.069 ms/instance**).
+These are local micro-measurements, not latency, throughput, carrier, LiveKit
+service, Windows API or physical-device performance guarantees.

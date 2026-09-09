@@ -88,9 +88,19 @@ class ConfirmationRequest:
         )
 
     def describe(self) -> str:
-        """A loggable summary - never includes argument values."""
+        """A loggable summary that never includes argument values.
+
+        A dial confirmation deliberately keeps its full canonical number in
+        ``target`` for the human confirmation UI, but this diagnostic summary
+        must not turn that sensitive UI value into an audit/debug value.
+        """
         risk = self.risk_level.value if self.risk_level else "unknown"
-        return f"{self.action} ({self.target or 'no target'}) [risk={risk}]"
+        target = (
+            "[sensitive confirmation target]"
+            if self.action in {"android.call.dial", "android.message.send"}
+            else (self.target or "no target")
+        )
+        return f"{self.action} ({target}) [risk={risk}]"
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON friendly view; argument *values* are deliberately omitted."""

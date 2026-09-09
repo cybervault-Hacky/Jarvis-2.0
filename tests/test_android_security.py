@@ -482,6 +482,15 @@ class LiveBridgeGateTests(unittest.IsolatedAsyncioTestCase):
 
     TRUST_TOOLS = ("android.device.pair", "android.device.unpair", "android.device.revoke")
 
+    def setUp(self) -> None:
+        # Explicit trusted fixture grants; Phase 10 removes import-time grants.
+        bridge.grant_device_permission(PERMISSION_ANDROID_BRIDGE_PAIR, PERMISSION_ANDROID_BRIDGE_MANAGE)
+        self.addCleanup(
+            bridge.device_permissions.revoke,
+            PERMISSION_ANDROID_BRIDGE_PAIR,
+            PERMISSION_ANDROID_BRIDGE_MANAGE,
+        )
+
     #: Explicit payloads: "android.device.unpair" also ends with "pair", so a
     #: suffix test would hand it the wrong argument and only ever see an
     #: invalid_argument failure.

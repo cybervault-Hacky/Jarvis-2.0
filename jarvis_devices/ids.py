@@ -8,10 +8,19 @@ from __future__ import annotations
 
 import uuid
 
-__all__ = ["new_execution_id", "new_confirmation_id", "EXECUTION_ID_PREFIX", "CONFIRMATION_ID_PREFIX"]
+__all__ = [
+    "new_execution_id",
+    "new_confirmation_id",
+    "new_plan_id",
+    "EXECUTION_ID_PREFIX",
+    "CONFIRMATION_ID_PREFIX",
+    "PLAN_ID_PREFIX",
+]
 
 EXECUTION_ID_PREFIX = "exec"
 CONFIRMATION_ID_PREFIX = "cfm"
+#: Phase 9 plan ids are non-secret correlation identifiers, never credentials.
+PLAN_ID_PREFIX = "plan"
 
 
 def new_execution_id(prefix: str = EXECUTION_ID_PREFIX) -> str:
@@ -21,4 +30,13 @@ def new_execution_id(prefix: str = EXECUTION_ID_PREFIX) -> str:
 
 def new_confirmation_id(prefix: str = CONFIRMATION_ID_PREFIX) -> str:
     """Return a unique confirmation id such as ``cfm-9ab2...``."""
+    return f"{prefix}-{uuid.uuid4().hex}"
+
+
+def new_plan_id(prefix: str = PLAN_ID_PREFIX) -> str:
+    """Return a non-secret correlation id such as ``plan-9ab2...``.
+
+    A plan id only locates a bounded in-memory plan.  It never grants
+    permission, substitutes for confirmation, or authorizes execution.
+    """
     return f"{prefix}-{uuid.uuid4().hex}"

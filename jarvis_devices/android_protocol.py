@@ -61,6 +61,11 @@ __all__ = [
     "AUTHENTICATED_TYPES",
     "RESPONSE_FOR",
     "SYSTEM_CONTROL_REQUESTS",
+    "SYSTEM_CONTROL_RESPONSES",
+    "CALL_REQUESTS",
+    "CALL_RESPONSES",
+    "MESSAGE_REQUESTS",
+    "MESSAGE_RESPONSES",
     "ALL_CAPABILITIES",
     "CAPABILITY_BRIDGE_PROTOCOL",
     "CAPABILITY_DEVICE_STATUS",
@@ -68,7 +73,13 @@ __all__ = [
     "CAPABILITY_SYSTEM_BRIGHTNESS",
     "CAPABILITY_SYSTEM_WIFI",
     "CAPABILITY_SYSTEM_BLUETOOTH",
-    "SYSTEM_CONTROL_RESPONSES",
+    "CAPABILITY_CALL_STATUS",
+    "CAPABILITY_CALL_DIAL",
+    "CAPABILITY_CALL_ANSWER",
+    "CAPABILITY_CALL_REJECT",
+    "CAPABILITY_CALL_END",
+    "CAPABILITY_MESSAGE_STATUS",
+    "CAPABILITY_MESSAGE_SEND",
     "validate_percent",
     "PERCENT_MIN",
     "PERCENT_MAX",
@@ -152,6 +163,26 @@ class MessageType(str, Enum):
     BLUETOOTH_SET = "bluetooth_set"
     BLUETOOTH_SET_RESPONSE = "bluetooth_set_response"
 
+    # Phase 7 - explicit Android call management. These are dedicated request
+    # and response pairs, not an intent, telecom method or generic action.
+    CALL_STATUS = "call_status"
+    CALL_STATUS_RESPONSE = "call_status_response"
+    CALL_DIAL = "call_dial"
+    CALL_DIAL_RESPONSE = "call_dial_response"
+    CALL_ANSWER = "call_answer"
+    CALL_ANSWER_RESPONSE = "call_answer_response"
+    CALL_REJECT = "call_reject"
+    CALL_REJECT_RESPONSE = "call_reject_response"
+    CALL_END = "call_end"
+    CALL_END_RESPONSE = "call_end_response"
+
+    # Phase 8 - explicit Android text messaging.  These carry opaque text in
+    # a strict payload; they are never a raw Android intent or command.
+    MESSAGE_STATUS = "message_status"
+    MESSAGE_STATUS_RESPONSE = "message_status_response"
+    MESSAGE_SEND = "message_send"
+    MESSAGE_SEND_RESPONSE = "message_send_response"
+
 
 #: Explicit allowlist - the only values accepted on the wire.
 MESSAGE_TYPES: FrozenSet[str] = frozenset(member.value for member in MessageType)
@@ -191,6 +222,15 @@ RESPONSE_FOR: Dict[str, str] = {
     MessageType.WIFI_SET.value: MessageType.WIFI_SET_RESPONSE.value,
     MessageType.BLUETOOTH_STATUS.value: MessageType.BLUETOOTH_STATUS_RESPONSE.value,
     MessageType.BLUETOOTH_SET.value: MessageType.BLUETOOTH_SET_RESPONSE.value,
+    # Phase 7 - every call operation has exactly one dedicated response.
+    MessageType.CALL_STATUS.value: MessageType.CALL_STATUS_RESPONSE.value,
+    MessageType.CALL_DIAL.value: MessageType.CALL_DIAL_RESPONSE.value,
+    MessageType.CALL_ANSWER.value: MessageType.CALL_ANSWER_RESPONSE.value,
+    MessageType.CALL_REJECT.value: MessageType.CALL_REJECT_RESPONSE.value,
+    MessageType.CALL_END.value: MessageType.CALL_END_RESPONSE.value,
+    # Phase 8 - each text-message operation has one dedicated response.
+    MessageType.MESSAGE_STATUS.value: MessageType.MESSAGE_STATUS_RESPONSE.value,
+    MessageType.MESSAGE_SEND.value: MessageType.MESSAGE_SEND_RESPONSE.value,
 }
 
 #: Phase 6 system-control requests (JARVIS -> phone). Everything outside this
@@ -214,6 +254,33 @@ SYSTEM_CONTROL_REQUESTS: FrozenSet[str] = frozenset(
 SYSTEM_CONTROL_RESPONSES: FrozenSet[str] = frozenset(
     RESPONSE_FOR[name] for name in SYSTEM_CONTROL_REQUESTS
 )
+
+#: Phase 7 call-management requests (JARVIS -> phone). This intentionally
+#: contains no generic execution primitive: each permitted operation is named.
+CALL_REQUESTS: FrozenSet[str] = frozenset(
+    {
+        MessageType.CALL_STATUS.value,
+        MessageType.CALL_DIAL.value,
+        MessageType.CALL_ANSWER.value,
+        MessageType.CALL_REJECT.value,
+        MessageType.CALL_END.value,
+    }
+)
+
+#: Their dedicated responses (phone -> JARVIS).
+CALL_RESPONSES: FrozenSet[str] = frozenset(RESPONSE_FOR[name] for name in CALL_REQUESTS)
+
+#: Phase 8 text-message requests.  This deliberately has no generic messaging,
+#: intent, arbitrary method or raw-send frame.
+MESSAGE_REQUESTS: FrozenSet[str] = frozenset(
+    {
+        MessageType.MESSAGE_STATUS.value,
+        MessageType.MESSAGE_SEND.value,
+    }
+)
+
+#: Their dedicated responses (phone -> JARVIS).
+MESSAGE_RESPONSES: FrozenSet[str] = frozenset(RESPONSE_FOR[name] for name in MESSAGE_REQUESTS)
 
 
 class AndroidProtocolError(Exception):
@@ -254,6 +321,17 @@ CAPABILITY_SYSTEM_VOLUME = "system.volume"
 CAPABILITY_SYSTEM_BRIGHTNESS = "system.brightness"
 CAPABILITY_SYSTEM_WIFI = "system.wifi"
 CAPABILITY_SYSTEM_BLUETOOTH = "system.bluetooth"
+# Phase 7 capabilities are deliberately operation-specific. An advertised
+# call status capability never implies permission to dial or alter a call.
+CAPABILITY_CALL_STATUS = "call.status"
+CAPABILITY_CALL_DIAL = "call.dial"
+CAPABILITY_CALL_ANSWER = "call.answer"
+CAPABILITY_CALL_REJECT = "call.reject"
+CAPABILITY_CALL_END = "call.end"
+# Phase 8 uses a separate status capability so advertising a messaging status
+# endpoint never grants the power to send text.
+CAPABILITY_MESSAGE_STATUS = "message.status"
+CAPABILITY_MESSAGE_SEND = "message.send"
 
 #: Everything this JARVIS build actually understands. A phone may advertise more
 #: (``system.power``, ``comms.call``, ...); those are reported as advertised but
@@ -265,6 +343,13 @@ ALL_CAPABILITIES: Tuple[str, ...] = (
     CAPABILITY_SYSTEM_BRIGHTNESS,
     CAPABILITY_SYSTEM_WIFI,
     CAPABILITY_SYSTEM_BLUETOOTH,
+    CAPABILITY_CALL_STATUS,
+    CAPABILITY_CALL_DIAL,
+    CAPABILITY_CALL_ANSWER,
+    CAPABILITY_CALL_REJECT,
+    CAPABILITY_CALL_END,
+    CAPABILITY_MESSAGE_STATUS,
+    CAPABILITY_MESSAGE_SEND,
 )
 
 #: Bounded representation for volume and brightness: an integer percentage.

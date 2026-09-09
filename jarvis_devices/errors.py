@@ -162,6 +162,7 @@ class ErrorCode:
     #: distinct from ANDROID_CONNECTION_FAILED so "never connected" is not
     #: confused with "tried to connect and could not".
     ANDROID_DEVICE_NOT_CONNECTED = "android_device_not_connected"
+    ANDROID_DEVICE_STALE = "android_device_stale"
     # Phase 6 - Android system control
     ANDROID_SYSTEM_UNAVAILABLE = "android_system_unavailable"
     ANDROID_SYSTEM_UNSUPPORTED = "android_system_unsupported"
@@ -173,3 +174,31 @@ class ErrorCode:
     ANDROID_BRIGHTNESS_UNAVAILABLE = "android_brightness_unavailable"
     ANDROID_WIFI_UNAVAILABLE = "android_wifi_unavailable"
     ANDROID_BLUETOOTH_UNAVAILABLE = "android_bluetooth_unavailable"
+    # Phase 7 - Android call management. These stay distinct from system
+    # control so a call permission or state failure cannot be misclassified.
+    ANDROID_CALL_UNAVAILABLE = "android_call_unavailable"
+    ANDROID_CALL_UNSUPPORTED = "android_call_unsupported"
+    ANDROID_CALL_PERMISSION_DENIED = "android_call_permission_denied"
+    ANDROID_CALL_INVALID_ARGUMENT = "android_call_invalid_argument"
+    ANDROID_CALL_INVALID_STATE = "android_call_invalid_state"
+    ANDROID_CALL_NO_ACTIVE_CALL = "android_call_no_active_call"
+    ANDROID_CALL_TIMEOUT = "android_call_timeout"
+    ANDROID_CALL_FAILED = "android_call_failed"
+    # Phase 8 - Android text messaging.  These are not system/call outcomes:
+    # each maps to the narrow messaging surface only.
+    ANDROID_MESSAGE_UNAVAILABLE = "android_message_unavailable"
+    ANDROID_MESSAGE_UNSUPPORTED = "android_message_unsupported"
+    ANDROID_MESSAGE_PERMISSION_DENIED = "android_message_permission_denied"
+    ANDROID_MESSAGE_INVALID_ARGUMENT = "android_message_invalid_argument"
+    ANDROID_MESSAGE_TIMEOUT = "android_message_timeout"
+    ANDROID_MESSAGE_OPERATION_CONFLICT = "android_message_operation_conflict"
+    ANDROID_MESSAGE_FAILED = "android_message_failed"
+    # Phase 9 - bounded cross-device orchestration failures.  These never
+    # indicate that an action ran; final manager/bridge errors remain separate.
+    CROSS_DEVICE_UNSUPPORTED = "cross_device_unsupported"
+    CROSS_DEVICE_AMBIGUOUS = "cross_device_ambiguous"
+    CROSS_DEVICE_TARGET_UNAVAILABLE = "cross_device_target_unavailable"
+    CROSS_DEVICE_PLAN_EXPIRED = "cross_device_plan_expired"
+    CROSS_DEVICE_PLAN_REPLAYED = "cross_device_plan_replayed"
+    CROSS_DEVICE_PLAN_INVALIDATED = "cross_device_plan_invalidated"
+    CROSS_DEVICE_PLAN_CAPACITY = "cross_device_plan_capacity"

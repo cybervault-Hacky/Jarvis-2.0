@@ -94,6 +94,9 @@ class BaseDeviceTool(ABC):
     #: the question, TTL and single use - this flag only removes the ability to
     #: opt the tool out via ``never_confirm``.
     confirmation_mandatory: bool = False
+    #: ``True`` when a caller supplied generic confirmation target must never
+    #: replace the tool's complete, user-safety-critical rendered target.
+    confirmation_target_mandatory: bool = False
     #: Declared arguments.
     argument_schema: ArgumentSchema = ArgumentSchema.empty()
 
@@ -128,6 +131,16 @@ class BaseDeviceTool(ABC):
             )
 
         try:
+            validated = self.normalize_arguments(validated)
+        except Exception:  # noqa: BLE001 - normalizers are an untrusted input boundary
+            return ToolResult.invalid_argument(
+                f"Invalid arguments for {self.name}.",
+                error_code=ErrorCode.INVALID_ARGUMENT,
+                tool_name=self.name,
+                execution_id=context.execution_id,
+            )
+
+        try:
             result = await self.run(validated, context)
         except Exception as exc:  # noqa: BLE001 - framework boundary
             return ToolResult.failure(
@@ -139,6 +152,24 @@ class BaseDeviceTool(ABC):
             ).marked_executed()
 
         return self._normalise(result, context)
+
+    # ------------------------------------------------------------------
+    # Optional pre-execution normalization
+    # ------------------------------------------------------------------
+    def normalize_arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Return validated arguments in their canonical form.
+
+        Most tools leave values unchanged.  Destination-bearing tools can
+        override this narrow hook so a confirmation is bound to the exact
+        canonical request that will execute, rather than a presentation form.
+        The action manager invokes it before permissions/confirmation and this
+        guarded direct entry point invokes it again defensively.
+        """
+        return dict(arguments)
+
+    def confirmation_target(self, arguments: Dict[str, Any]) -> str:
+        """Human-readable confirmation target, without changing execution."""
+        return self.description or self.name
 
     # ------------------------------------------------------------------
     # Implemented by concrete tools (later phases)

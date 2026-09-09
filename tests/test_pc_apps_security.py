@@ -21,6 +21,7 @@ from unittest import mock
 
 import Jarvis_device_control as bridge
 from jarvis_devices import ErrorCode
+from jarvis_devices.permissions import PERMISSION_APP_CONTROL
 from jarvis_devices.pc_apps import (
     ApplicationSpec,
     PC_APPLICATION_TOOL_NAMES,
@@ -31,6 +32,9 @@ from jarvis_devices.pc_system import PC_SYSTEM_TOOL_NAMES
 from jarvis_devices.pc_power import PC_POWER_TOOL_NAMES
 from jarvis_devices.android_tools import ANDROID_BRIDGE_TOOL_NAMES
 from jarvis_devices.android_system_tools import ANDROID_SYSTEM_TOOL_NAMES
+from jarvis_devices.android_call_tools import ANDROID_CALL_TOOL_NAMES
+from jarvis_devices.android_message_tools import ANDROID_MESSAGE_TOOL_NAMES
+from jarvis_devices.cross_device import CROSS_DEVICE_TOOL_NAMES
 
 try:  # imported as part of the ``tests`` package (pytest / discover -t .)
     from .pc_support import FakePCBackend
@@ -116,6 +120,10 @@ class NoProcessSpawningTests(unittest.TestCase):
 
 class ArbitraryExecutionTests(unittest.TestCase):
     def test_shell_like_names_are_unknown_applications(self) -> None:
+        # Grant only so the test reaches the catalog validator, not because the
+        # production process has this permission by default.
+        bridge.grant_device_permission(PERMISSION_APP_CONTROL)
+        self.addCleanup(bridge.device_permissions.revoke, PERMISSION_APP_CONTROL)
         fake = FakePCBackend((CHROME_WINDOW,))
         with BridgeDesktop(fake):
             for payload in HOSTILE_INPUTS:
@@ -157,8 +165,9 @@ class ArbitraryExecutionTests(unittest.TestCase):
         # Closed world: only the explicitly registered tools exist. Phase 3
         # added the thirteen pc.system.* tools, Phase 4 the five pc.power.* tools,
         # Phase 5 the six android.device/bridge tools and Phase 6 the thirteen
-        # android.system.* tools to this allow-list - anything else must be
-        # refused.
+        # android.system.* tools, Phase 7 the five android.call.* tools and
+        # Phase 8 the two android.message.* tools and Phase 9 the two read-only
+        # cross.device.* tools to this allow-list - anything else must be refused.
         self.assertEqual(
             set(bridge.device_registry.names()),
             set(PC_APPLICATION_TOOL_NAMES)
@@ -166,6 +175,9 @@ class ArbitraryExecutionTests(unittest.TestCase):
             | set(PC_POWER_TOOL_NAMES)
             | set(ANDROID_BRIDGE_TOOL_NAMES)
             | set(ANDROID_SYSTEM_TOOL_NAMES)
+            | set(ANDROID_CALL_TOOL_NAMES)
+            | set(ANDROID_MESSAGE_TOOL_NAMES)
+            | set(CROSS_DEVICE_TOOL_NAMES)
             | {"jarvis.framework.diagnostics"},
         )
         for tool in bridge.device_registry.list_tools():
@@ -180,8 +192,7 @@ class ArbitraryExecutionTests(unittest.TestCase):
         self.assertIn(ErrorCode.UNKNOWN_TOOL, answer)
 
     def test_device_action_cannot_reach_pc_tools_without_permission(self) -> None:
-        bridge.device_permissions.revoke("system.app.control")
-        self.addCleanup(bridge.device_permissions.grant, "system.app.control")
+        bridge.device_permissions.revoke(PERMISSION_APP_CONTROL)
         fake = FakePCBackend((CHROME_WINDOW,))
         with BridgeDesktop(fake):
             answer = asyncio.run(bridge.run_device_action("pc.app.close", '{"app": "notepad"}'))
@@ -190,6 +201,13 @@ class ArbitraryExecutionTests(unittest.TestCase):
 
 
 class BridgeBehaviourTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Production now starts deny-by-default. This fixture represents the
+        # trusted host/UI selecting the one capability required for these fake
+        # backend behavior checks.
+        bridge.grant_device_permission(PERMISSION_APP_CONTROL)
+        self.addCleanup(bridge.device_permissions.revoke, PERMISSION_APP_CONTROL)
+
     def test_open_application_launches_a_catalogued_app(self) -> None:
         fake = FakePCBackend()
         with BridgeDesktop(fake):

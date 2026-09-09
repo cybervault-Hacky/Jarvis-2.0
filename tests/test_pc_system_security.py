@@ -226,6 +226,18 @@ class BridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.patcher = BridgeSystemBackend(self.fake)
         self.patcher.__enter__()
         self.addCleanup(self.patcher.__exit__, None, None, None)
+        # Explicit test-only trusted grants for the fake-backend behaviors.
+        bridge.grant_device_permission(
+            PERMISSION_VOLUME_CONTROL,
+            PERMISSION_DISPLAY_CONTROL,
+            PERMISSION_NETWORK_CONTROL,
+        )
+        self.addCleanup(
+            bridge.device_permissions.revoke,
+            PERMISSION_VOLUME_CONTROL,
+            PERMISSION_DISPLAY_CONTROL,
+            PERMISSION_NETWORK_CONTROL,
+        )
 
     # ------------------------------------------------------------------
     def test_all_fourteen_tools_are_registered(self) -> None:
@@ -233,7 +245,8 @@ class BridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(PC_SYSTEM_TOOL_NAMES), 14)
         self.assertTrue(set(PC_SYSTEM_TOOL_NAMES) <= registered)
 
-    def test_the_bridge_grants_only_the_three_local_permissions(self) -> None:
+    def test_fixture_grants_only_the_three_required_local_permissions(self) -> None:
+        # The grants above are explicit fixture setup, not production bootstrap.
         granted = set(bridge.device_permissions.granted_permissions)
         self.assertTrue(
             {PERMISSION_VOLUME_CONTROL, PERMISSION_DISPLAY_CONTROL, PERMISSION_NETWORK_CONTROL} <= granted

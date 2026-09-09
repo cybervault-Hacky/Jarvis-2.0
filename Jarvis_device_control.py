@@ -4,24 +4,13 @@ This is the *additive* integration point between the existing JARVIS agent
 (``agent.py`` -> ``Agent(tools=[...])``) and the new secure framework in
 :mod:`jarvis_devices`.
 
-Existing tools (``Jarvis_google_search``, ``jarvis_get_whether``,
-``Jarvis_file_opner``, ``Jarvis_window_CTRL``, ``keyboard_mouse_CTRL``) keep
-working exactly as before - nothing here replaces them.
-
-Two function tools are exposed to the model:
-
-``device_action(tool_name, arguments_json)``
-    Run a *registered* device tool. Unregistered names are rejected; arguments
-    are validated against the tool's schema; permissions and confirmations are
-    enforced by the framework.
-
-``device_confirmation(confirmation_id, approved)``
-    Apply the user's yes/no to a pending confirmation. When approved, the
-    stored action is executed; when declined, nothing runs.
-
-Both are thin ``@function_tool`` wrappers around plain coroutines
-(:func:`run_device_action` / :func:`resolve_device_confirmation`) so the logic
-stays testable whether or not LiveKit is installed.
+Phase 10 deliberately keeps legacy file/window/input modules outside the active
+Agent surface. The model can call only fixed wrappers for registered capabilities.
+There is no model-facing generic dispatcher or confirmation resolver:
+``device_action`` and ``device_confirmation`` remain plain compatibility
+coroutines for a trusted application/UI integration only. This module starts
+with read-only device-status permission; a trusted host/UI must explicitly grant
+the smallest required control permission.
 
 Phase 1 registers no real device action - only a SAFE framework self check
 (``jarvis.framework.diagnostics``) that touches no device. Future phases add
@@ -57,17 +46,6 @@ from jarvis_devices import (
 )
 from jarvis_devices.adapters import AndroidDeviceAdapter, PCDeviceAdapter
 from jarvis_devices.diagnostics import FrameworkDiagnosticsTool
-from jarvis_devices.permissions import (
-    PERMISSION_ANDROID_BRIDGE_MANAGE,
-    PERMISSION_ANDROID_BRIDGE_PAIR,
-    PERMISSION_ANDROID_SYSTEM_CONTROL,
-    PERMISSION_ANDROID_SYSTEM_READ,
-    PERMISSION_APP_CONTROL,
-    PERMISSION_DISPLAY_CONTROL,
-    PERMISSION_NETWORK_CONTROL,
-    PERMISSION_POWER_CONTROL,
-    PERMISSION_VOLUME_CONTROL,
-)
 from jarvis_devices.pc_apps import (
     PC_APPLICATION_TOOL_NAMES,
     ApplicationCatalog,
@@ -98,6 +76,15 @@ from jarvis_devices.android_system_tools import (
     ANDROID_SYSTEM_TOOL_NAMES,
     build_android_system_tools,
 )
+from jarvis_devices.android_call_tools import (
+    ANDROID_CALL_TOOL_NAMES,
+    build_android_call_tools,
+)
+from jarvis_devices.android_message_tools import (
+    ANDROID_MESSAGE_TOOL_NAMES,
+    build_android_message_tools,
+)
+from jarvis_devices.cross_device import CrossDevicePlanner, build_cross_device_tools
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +207,33 @@ __all__ = [
     "android_bluetooth_status",
     "android_bluetooth_enable",
     "android_bluetooth_disable",
+    # Phase 7 - Android calls
+    "android_calls",
+    "android_call_tools",
+    "run_android_call_status",
+    "run_android_call_dial",
+    "run_android_call_answer",
+    "run_android_call_reject",
+    "run_android_call_end",
+    "android_call_status",
+    "android_call_dial",
+    "android_call_answer",
+    "android_call_reject",
+    "android_call_end",
+    # Phase 8 - Android text messaging
+    "android_messages",
+    "android_message_tools",
+    "run_android_message_status",
+    "run_android_message_send",
+    "android_message_status",
+    "android_message_send",
+    # Phase 9 - read-only cross-device intelligence (no model-facing executor)
+    "cross_device_planner",
+    "cross_device_tools",
+    "run_cross_device_status",
+    "run_cross_device_capabilities",
+    "cross_device_status",
+    "cross_device_capabilities",
 ]
 
 # ---------------------------------------------------------------------------
@@ -254,6 +268,8 @@ def framework_summary() -> Dict[str, Any]:
         "power_capabilities": _power_capabilities(),
         "android_bridge": _android_bridge_summary(),
         "android_system_capabilities": _android_system_capabilities(),
+        "android_call_capabilities": _android_call_capabilities(),
+        "android_message_capabilities": _android_message_capabilities(),
         "available_tools": [tool.name for tool in device_registry.list_tools(available_only=True)],
         "granted_permission_count": len(device_permissions.granted_permissions),
         "platforms": device_platforms.describe(),
@@ -295,9 +311,9 @@ pc_application_tools = build_pc_application_tools(pc_application_backend, pc_app
 for _pc_tool in pc_application_tools:
     device_registry.register(_pc_tool)
 
-# Explicit opt-in for the three control operations (open / focus / close).
-# Revoke it again with ``device_permissions.revoke(PERMISSION_APP_CONTROL)``.
-device_permissions.grant(PERMISSION_APP_CONTROL)
+# Phase 10: no control permission is granted at import time. A trusted host/UI
+# integration must explicitly grant the smallest required permission through
+# grant_device_permission() for its own session/deployment policy.
 
 
 def register_application(spec: ApplicationSpec) -> ApplicationSpec:
@@ -322,19 +338,9 @@ pc_system_tools = build_pc_system_tools(pc_system_backend)
 for _pc_system_tool in pc_system_tools:
     device_registry.register(_pc_system_tool)
 
-# Explicit opt-in for the three local control capabilities. Connectivity
-# (Wi-Fi / Bluetooth) is additionally gated by the confirmation policy because
-# those tools are EXTERNAL_ACTION.
-# Revoke any of them with ``device_permissions.revoke(<permission>)``.
-device_permissions.grant(
-    PERMISSION_VOLUME_CONTROL,
-    PERMISSION_DISPLAY_CONTROL,
-    PERMISSION_NETWORK_CONTROL,
-)
-# PERMISSION_BLUETOOTH_CONTROL is deliberately NOT granted: Windows exposes no
-# reliable programmatic Bluetooth radio switch, so those two tools stay
-# permission denied instead of pretending to work. Grant it explicitly if a
-# future backend ever supports the radio.
+# Phase 10: local volume/display/network control is deny-by-default. Wi-Fi and
+# Bluetooth also remain confirmation-gated when a trusted integration elects to
+# grant their separate permissions.
 
 
 def _system_capabilities() -> Dict[str, str]:
@@ -359,10 +365,8 @@ pc_power_tools = build_pc_power_tools(pc_power_backend)
 for _pc_power_tool in pc_power_tools:
     device_registry.register(_pc_power_tool)
 
-# Explicit opt-in for power control. Revoke it with
-# ``device_permissions.revoke(PERMISSION_POWER_CONTROL)`` - the tools then answer
-# PERMISSION_DENIED and nothing can reach the operating system.
-device_permissions.grant(PERMISSION_POWER_CONTROL)
+# Phase 10: power control remains denied until a trusted host/UI grants
+# PERMISSION_POWER_CONTROL. Its mandatory confirmation applies independently.
 
 
 def _power_capabilities() -> Dict[str, str]:
@@ -404,10 +408,8 @@ android_bridge_tools = build_android_bridge_tools(android_bridge)
 for _android_tool in android_bridge_tools:
     device_registry.register(_android_tool)
 
-# Explicit opt-in. Revoke either permission and the matching tools answer
-# PERMISSION_DENIED without touching the bridge:
-#   device_permissions.revoke(PERMISSION_ANDROID_BRIDGE_MANAGE)
-device_permissions.grant(PERMISSION_ANDROID_BRIDGE_PAIR, PERMISSION_ANDROID_BRIDGE_MANAGE)
+# Phase 10: pairing and trust-management permissions are not bootstrapped.
+# A trusted host/UI must grant them explicitly; a model has no grant tool.
 
 
 def android_bridge_summary() -> Dict[str, Any]:
@@ -452,10 +454,8 @@ android_system = android_system_tools[0].control
 for _android_system_tool in android_system_tools:
     device_registry.register(_android_system_tool)
 
-# Explicit opt-in. Revoke either permission and the matching tools answer
-# PERMISSION_DENIED without the bridge ever being contacted:
-#   device_permissions.revoke(PERMISSION_ANDROID_SYSTEM_CONTROL)
-device_permissions.grant(PERMISSION_ANDROID_SYSTEM_READ, PERMISSION_ANDROID_SYSTEM_CONTROL)
+# Phase 10: Android system read/control permissions are denied unless a trusted
+# host/UI explicitly grants the individually required permission.
 
 
 def _android_system_capabilities() -> Dict[str, str]:
@@ -463,6 +463,67 @@ def _android_system_capabilities() -> Dict[str, str]:
     from jarvis_devices.android_system import SYSTEM_CONTROL_CAPABILITIES
 
     return {capability: "understood" for capability in SYSTEM_CONTROL_CAPABILITIES}
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 - Android calls
+#
+# The five explicit call tools share the same Phase 5 AndroidDeviceBridge as
+# system control.  Their only target is a registered device id and dial accepts
+# only a canonical E.164 phone number.  No raw telecom API, call id, recording,
+# contact lookup, microphone, messaging, shell or network endpoint is exposed.
+# ---------------------------------------------------------------------------
+android_call_tools = build_android_call_tools(android_bridge)
+android_calls = android_call_tools[0].control
+for _android_call_tool in android_call_tools:
+    device_registry.register(_android_call_tool)
+
+# Phase 10: Android call read and control stay separate and both are denied by
+# default. A trusted host/UI may grant either one explicitly.
+
+
+def _android_call_capabilities() -> Dict[str, str]:
+    """Which explicit Android call operations this JARVIS build understands."""
+    from jarvis_devices.android_calls import CALL_CAPABILITIES
+
+    return {capability: "understood" for capability in CALL_CAPABILITIES}
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 - Android text messaging
+#
+# The two fixed tools reuse the authenticated Phase 5 bridge, current registry,
+# permission policy and confirmation manager.  They expose neither contacts nor
+# message history; sending requires a canonical recipient and opaque text.
+# ---------------------------------------------------------------------------
+android_message_tools = build_android_message_tools(android_bridge)
+android_messages = android_message_tools[0].control
+for _android_message_tool in android_message_tools:
+    device_registry.register(_android_message_tool)
+
+# Phase 10: Android message read/send permissions stay separate and denied by
+# default. A trusted host/UI must grant either one explicitly.
+
+# ---------------------------------------------------------------------------
+# Phase 9 - Cross-device intelligence and bounded orchestration
+#
+# The planner reads only registry metadata and the existing paired-device
+# bridge state.  It creates internal plans for application code but exposes no
+# generic plan executor to the model.  The two registered LiveKit tools below
+# are read-only inventory/capability views and still pass through the same
+# DeviceActionManager permission/audit path as every other tool.
+# ---------------------------------------------------------------------------
+cross_device_planner = CrossDevicePlanner(device_manager, android_bridge=android_bridge)
+cross_device_tools = build_cross_device_tools(cross_device_planner)
+for _cross_device_tool in cross_device_tools:
+    device_registry.register(_cross_device_tool)
+
+
+def _android_message_capabilities() -> Dict[str, str]:
+    """Which explicit Android messaging capabilities this build understands."""
+    from jarvis_devices.android_messages import MESSAGE_CAPABILITIES
+
+    return {capability: "understood" for capability in MESSAGE_CAPABILITIES}
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +582,7 @@ async def run_device_action(tool_name: str, arguments_json: str = "") -> str:
     return describe_result(result)
 
 
-async def resolve_device_confirmation(confirmation_id: str, approved: bool = True) -> str:
+async def resolve_device_confirmation(confirmation_id: str, approved: bool) -> str:
     """Apply the user's yes/no to a pending confirmation."""
     confirmation_id = (confirmation_id or "").strip()
     if not confirmation_id:
@@ -531,31 +592,32 @@ async def resolve_device_confirmation(confirmation_id: str, approved: bool = Tru
                 error=ErrorCode.INVALID_ARGUMENT,
             )
         )
-    result = await device_manager.resolve_confirmation(confirmation_id, bool(approved))
+    if not isinstance(approved, bool):
+        return describe_result(
+            ToolResult.invalid_argument(
+                "approved must be a boolean.", error=ErrorCode.INVALID_ARGUMENT
+            )
+        )
+    result = await device_manager.resolve_confirmation(confirmation_id, approved)
     return describe_result(result)
 
 
 # ---------------------------------------------------------------------------
-# LiveKit function tools
+# Internal compatibility entry points (not LiveKit model tools)
 # ---------------------------------------------------------------------------
-@function_tool
+# Phase 10 removes the generic dispatcher and model-controlled confirmation
+# resolver from the Agent tool list.  A trusted application/UI integration may
+# still call these internal compatibility coroutines, while a model can call
+# only one of the fixed capability wrappers below.  This preserves the manager
+# boundary without allowing model output to select arbitrary registered tools or
+# approve its own pending confirmation.
 async def device_action(tool_name: str, arguments_json: str = "") -> str:
-    """Run one of JARVIS's registered device tools.
-
-    Only tools that are explicitly registered in the device tool registry can
-    run. Arguments must be a JSON object matching the tool's declared schema.
-    Sensitive tools answer with a confirmation request instead of acting.
-    """
+    """Internal compatibility wrapper for a registered device request."""
     return await run_device_action(tool_name, arguments_json)
 
 
-@function_tool
-async def device_confirmation(confirmation_id: str, approved: bool = True) -> str:
-    """Answer a pending device confirmation on the user's behalf.
-
-    Pass ``approved=True`` only after the user has clearly said yes. Anything
-    else is recorded as a refusal and no device action runs.
-    """
+async def device_confirmation(confirmation_id: str, approved: bool) -> str:
+    """Internal compatibility wrapper for a trusted human/UI approval."""
     return await resolve_device_confirmation(confirmation_id, approved)
 
 
@@ -1270,3 +1332,194 @@ async def android_bluetooth_disable(device: str) -> str:
         device: The registered device id from ``android_device_list``.
     """
     return await run_android_bluetooth_disable(device)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 tools - Android calls
+#
+# The model can only choose among these five fixed operations.  It cannot pass a
+# call/session id, a contact, URI, host, Android API name, recording setting or
+# confirmation escape hatch.  Dial validation and mandatory confirmation live
+# in the registered device tool, before a signed bridge frame is sent.
+# ---------------------------------------------------------------------------
+async def run_android_call_status(device: str) -> str:
+    """Report the current call state on one trusted Android device."""
+    return await _request("android.call.status", {"device": device})
+
+
+async def run_android_call_dial(device: str, phone_number: str) -> str:
+    """Request a confirmed outgoing call to a strict international number."""
+    return await _request(
+        "android.call.dial", {"device": device, "phone_number": phone_number}
+    )
+
+
+async def run_android_call_answer(device: str) -> str:
+    """Answer only the current incoming call on one Android device."""
+    return await _request("android.call.answer", {"device": device})
+
+
+async def run_android_call_reject(device: str) -> str:
+    """Reject only the current incoming call on one Android device."""
+    return await _request("android.call.reject", {"device": device})
+
+
+async def run_android_call_end(device: str) -> str:
+    """End only the current active call on one Android device."""
+    return await _request("android.call.end", {"device": device})
+
+
+@function_tool
+async def android_call_status(device: str) -> str:
+    """Report current call state on a trusted Android device. Read only.
+
+    It reports only the current state/direction where Android safely exposes it;
+    it does not expose caller history, contact data, call contents or audio.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_status(device)
+
+
+@function_tool
+async def android_call_dial(device: str, phone_number: str) -> str:
+    """Place a call on a trusted Android device after explicit confirmation.
+
+    The number must be international E.164 (starting with ``+``); spaces,
+    parentheses and hyphens are merely normalized formatting.  The confirmation
+    explicitly displays the normalized number and selected device.  There is no
+    URI, contact, Android API, call id or destination-type argument.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+        phone_number: A strict international telephone number beginning with +.
+    """
+    return await run_android_call_dial(device, phone_number)
+
+
+@function_tool
+async def android_call_answer(device: str) -> str:
+    """Answer the current incoming call on one trusted Android device.
+
+    This asks for confirmation under the external-action policy.  It has no
+    call identifier parameter and cannot select another person's call.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_answer(device)
+
+
+@function_tool
+async def android_call_reject(device: str) -> str:
+    """Reject the current incoming call on one trusted Android device.
+
+    This asks for confirmation under the external-action policy and exposes no
+    call identifier or caller/contact data.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_reject(device)
+
+
+@function_tool
+async def android_call_end(device: str) -> str:
+    """End the current active call on one trusted Android device.
+
+    This asks for confirmation under the external-action policy.  If no call is
+    active JARVIS reports that no call was ended instead of claiming success.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_end(device)
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 tools - Android text messaging
+#
+# The model selects only a trusted device, explicit international recipient and
+# opaque message text.  It cannot send a contact id, URI, transport endpoint,
+# operation id, Android API/method, retry, or confirmation bypass.
+# ---------------------------------------------------------------------------
+async def run_android_message_status(device: str) -> str:
+    """Report privacy-safe text-messaging capability for a trusted device."""
+    return await _request("android.message.status", {"device": device})
+
+
+async def run_android_message_send(device: str, recipient: str, message: str) -> str:
+    """Request one explicitly confirmed text message."""
+    return await _request(
+        "android.message.send",
+        {"device": device, "recipient": recipient, "message": message},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 tools - only safe inventory/capability aggregation reaches LiveKit.
+# Planning/execution is deliberately internal API; existing specific registered
+# tools and the manager confirmation flow remain the only action surface.
+# ---------------------------------------------------------------------------
+async def run_cross_device_status() -> str:
+    """Read the privacy-minimized cross-device status inventory."""
+    return await _request("cross.device.status", {})
+
+
+async def run_cross_device_capabilities() -> str:
+    """Read currently registered cross-device capability metadata."""
+    return await _request("cross.device.capabilities", {})
+
+
+@function_tool
+async def cross_device_status() -> str:
+    """Read the current safe cross-device inventory without performing an action.
+
+    The result contains canonical device ids, platform, trust/connection/
+    freshness/availability state and registered capability names only. It never
+    reveals keys, addresses, transport internals, contact/message/call data or
+    device history. An offline or revoked device is reported, never repaired.
+    """
+    return await run_cross_device_status()
+
+
+@function_tool
+async def cross_device_capabilities() -> str:
+    """Read safe registered capabilities for each known device.
+
+    This is status metadata only. It neither plans nor runs an action, grants a
+    permission, changes trust, discovers devices, or bypasses confirmation.
+    """
+    return await run_cross_device_capabilities()
+
+
+@function_tool
+async def android_message_status(device: str) -> str:
+    """Report text-messaging availability on a trusted Android device.
+
+    This is read only. It returns only current messaging capability/availability
+    metadata, never contacts, conversations, notifications, message history or
+    message contents.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_message_status(device)
+
+
+@function_tool
+async def android_message_send(device: str, recipient: str, message: str) -> str:
+    """Send one text message after explicit human confirmation.
+
+    ``recipient`` must be an international E.164 phone number starting with
+    ``+``; contact names, URI schemes and endpoints are not accepted.  The
+    message is bounded opaque Unicode text and is sent exactly as written.  The
+    confirmation shows the selected device, canonical recipient and exact text.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+        recipient: Explicit international E.164 recipient beginning with +.
+        message: The exact bounded Unicode text to send.
+    """
+    return await run_android_message_send(device, recipient, message)
