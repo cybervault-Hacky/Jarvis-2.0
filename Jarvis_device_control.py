@@ -62,6 +62,8 @@ from jarvis_devices.permissions import (
     PERMISSION_ANDROID_BRIDGE_PAIR,
     PERMISSION_ANDROID_SYSTEM_CONTROL,
     PERMISSION_ANDROID_SYSTEM_READ,
+    PERMISSION_ANDROID_CALL_READ,
+    PERMISSION_ANDROID_CALL_CONTROL,
     PERMISSION_APP_CONTROL,
     PERMISSION_DISPLAY_CONTROL,
     PERMISSION_NETWORK_CONTROL,
@@ -97,6 +99,10 @@ from jarvis_devices.android_tools import (
 from jarvis_devices.android_system_tools import (
     ANDROID_SYSTEM_TOOL_NAMES,
     build_android_system_tools,
+)
+from jarvis_devices.android_call_tools import (
+    ANDROID_CALL_TOOL_NAMES,
+    build_android_call_tools,
 )
 
 logger = logging.getLogger(__name__)
@@ -220,6 +226,19 @@ __all__ = [
     "android_bluetooth_status",
     "android_bluetooth_enable",
     "android_bluetooth_disable",
+    # Phase 7 - Android calls
+    "android_calls",
+    "android_call_tools",
+    "run_android_call_status",
+    "run_android_call_dial",
+    "run_android_call_answer",
+    "run_android_call_reject",
+    "run_android_call_end",
+    "android_call_status",
+    "android_call_dial",
+    "android_call_answer",
+    "android_call_reject",
+    "android_call_end",
 ]
 
 # ---------------------------------------------------------------------------
@@ -254,6 +273,7 @@ def framework_summary() -> Dict[str, Any]:
         "power_capabilities": _power_capabilities(),
         "android_bridge": _android_bridge_summary(),
         "android_system_capabilities": _android_system_capabilities(),
+        "android_call_capabilities": _android_call_capabilities(),
         "available_tools": [tool.name for tool in device_registry.list_tools(available_only=True)],
         "granted_permission_count": len(device_permissions.granted_permissions),
         "platforms": device_platforms.describe(),
@@ -466,6 +486,31 @@ def _android_system_capabilities() -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 - Android calls
+#
+# The five explicit call tools share the same Phase 5 AndroidDeviceBridge as
+# system control.  Their only target is a registered device id and dial accepts
+# only a canonical E.164 phone number.  No raw telecom API, call id, recording,
+# contact lookup, microphone, messaging, shell or network endpoint is exposed.
+# ---------------------------------------------------------------------------
+android_call_tools = build_android_call_tools(android_bridge)
+android_calls = android_call_tools[0].control
+for _android_call_tool in android_call_tools:
+    device_registry.register(_android_call_tool)
+
+# Explicit, narrowly scoped opt-in.  Read and control are separate; revoking
+# control blocks dial/answer/reject/end without affecting status.
+device_permissions.grant(PERMISSION_ANDROID_CALL_READ, PERMISSION_ANDROID_CALL_CONTROL)
+
+
+def _android_call_capabilities() -> Dict[str, str]:
+    """Which explicit Android call operations this JARVIS build understands."""
+    from jarvis_devices.android_calls import CALL_CAPABILITIES
+
+    return {capability: "understood" for capability in CALL_CAPABILITIES}
+
+
+# ---------------------------------------------------------------------------
 # Argument handling - JSON only, never a shell
 # ---------------------------------------------------------------------------
 def parse_arguments(arguments_json: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -521,7 +566,7 @@ async def run_device_action(tool_name: str, arguments_json: str = "") -> str:
     return describe_result(result)
 
 
-async def resolve_device_confirmation(confirmation_id: str, approved: bool = True) -> str:
+async def resolve_device_confirmation(confirmation_id: str, approved: bool) -> str:
     """Apply the user's yes/no to a pending confirmation."""
     confirmation_id = (confirmation_id or "").strip()
     if not confirmation_id:
@@ -531,7 +576,13 @@ async def resolve_device_confirmation(confirmation_id: str, approved: bool = Tru
                 error=ErrorCode.INVALID_ARGUMENT,
             )
         )
-    result = await device_manager.resolve_confirmation(confirmation_id, bool(approved))
+    if not isinstance(approved, bool):
+        return describe_result(
+            ToolResult.invalid_argument(
+                "approved must be a boolean.", error=ErrorCode.INVALID_ARGUMENT
+            )
+        )
+    result = await device_manager.resolve_confirmation(confirmation_id, approved)
     return describe_result(result)
 
 
@@ -550,7 +601,7 @@ async def device_action(tool_name: str, arguments_json: str = "") -> str:
 
 
 @function_tool
-async def device_confirmation(confirmation_id: str, approved: bool = True) -> str:
+async def device_confirmation(confirmation_id: str, approved: bool) -> str:
     """Answer a pending device confirmation on the user's behalf.
 
     Pass ``approved=True`` only after the user has clearly said yes. Anything
@@ -1270,3 +1321,106 @@ async def android_bluetooth_disable(device: str) -> str:
         device: The registered device id from ``android_device_list``.
     """
     return await run_android_bluetooth_disable(device)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 tools - Android calls
+#
+# The model can only choose among these five fixed operations.  It cannot pass a
+# call/session id, a contact, URI, host, Android API name, recording setting or
+# confirmation escape hatch.  Dial validation and mandatory confirmation live
+# in the registered device tool, before a signed bridge frame is sent.
+# ---------------------------------------------------------------------------
+async def run_android_call_status(device: str) -> str:
+    """Report the current call state on one trusted Android device."""
+    return await _request("android.call.status", {"device": device})
+
+
+async def run_android_call_dial(device: str, phone_number: str) -> str:
+    """Request a confirmed outgoing call to a strict international number."""
+    return await _request(
+        "android.call.dial", {"device": device, "phone_number": phone_number}
+    )
+
+
+async def run_android_call_answer(device: str) -> str:
+    """Answer only the current incoming call on one Android device."""
+    return await _request("android.call.answer", {"device": device})
+
+
+async def run_android_call_reject(device: str) -> str:
+    """Reject only the current incoming call on one Android device."""
+    return await _request("android.call.reject", {"device": device})
+
+
+async def run_android_call_end(device: str) -> str:
+    """End only the current active call on one Android device."""
+    return await _request("android.call.end", {"device": device})
+
+
+@function_tool
+async def android_call_status(device: str) -> str:
+    """Report current call state on a trusted Android device. Read only.
+
+    It reports only the current state/direction where Android safely exposes it;
+    it does not expose caller history, contact data, call contents or audio.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_status(device)
+
+
+@function_tool
+async def android_call_dial(device: str, phone_number: str) -> str:
+    """Place a call on a trusted Android device after explicit confirmation.
+
+    The number must be international E.164 (starting with ``+``); spaces,
+    parentheses and hyphens are merely normalized formatting.  The confirmation
+    explicitly displays the normalized number and selected device.  There is no
+    URI, contact, Android API, call id or destination-type argument.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+        phone_number: A strict international telephone number beginning with +.
+    """
+    return await run_android_call_dial(device, phone_number)
+
+
+@function_tool
+async def android_call_answer(device: str) -> str:
+    """Answer the current incoming call on one trusted Android device.
+
+    This asks for confirmation under the external-action policy.  It has no
+    call identifier parameter and cannot select another person's call.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_answer(device)
+
+
+@function_tool
+async def android_call_reject(device: str) -> str:
+    """Reject the current incoming call on one trusted Android device.
+
+    This asks for confirmation under the external-action policy and exposes no
+    call identifier or caller/contact data.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_reject(device)
+
+
+@function_tool
+async def android_call_end(device: str) -> str:
+    """End the current active call on one trusted Android device.
+
+    This asks for confirmation under the external-action policy.  If no call is
+    active JARVIS reports that no call was ended instead of claiming success.
+
+    Args:
+        device: The registered device id from ``android_device_list``.
+    """
+    return await run_android_call_end(device)

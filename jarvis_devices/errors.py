@@ -162,6 +162,7 @@ class ErrorCode:
     #: distinct from ANDROID_CONNECTION_FAILED so "never connected" is not
     #: confused with "tried to connect and could not".
     ANDROID_DEVICE_NOT_CONNECTED = "android_device_not_connected"
+    ANDROID_DEVICE_STALE = "android_device_stale"
     # Phase 6 - Android system control
     ANDROID_SYSTEM_UNAVAILABLE = "android_system_unavailable"
     ANDROID_SYSTEM_UNSUPPORTED = "android_system_unsupported"
@@ -173,3 +174,13 @@ class ErrorCode:
     ANDROID_BRIGHTNESS_UNAVAILABLE = "android_brightness_unavailable"
     ANDROID_WIFI_UNAVAILABLE = "android_wifi_unavailable"
     ANDROID_BLUETOOTH_UNAVAILABLE = "android_bluetooth_unavailable"
+    # Phase 7 - Android call management. These stay distinct from system
+    # control so a call permission or state failure cannot be misclassified.
+    ANDROID_CALL_UNAVAILABLE = "android_call_unavailable"
+    ANDROID_CALL_UNSUPPORTED = "android_call_unsupported"
+    ANDROID_CALL_PERMISSION_DENIED = "android_call_permission_denied"
+    ANDROID_CALL_INVALID_ARGUMENT = "android_call_invalid_argument"
+    ANDROID_CALL_INVALID_STATE = "android_call_invalid_state"
+    ANDROID_CALL_NO_ACTIVE_CALL = "android_call_no_active_call"
+    ANDROID_CALL_TIMEOUT = "android_call_timeout"
+    ANDROID_CALL_FAILED = "android_call_failed"

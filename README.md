@@ -1013,7 +1013,203 @@ Phase 3 tools, the 5 Phase 4 tools, the 6 Phase 5 tools and the 13 Phase 6 tools
 with every earlier tool still in the same order and each new tool appearing
 exactly once. The bridge registry holds 44 tools with no duplicates.
 
-**Out of scope (Phase 7+):** Android app control, Android power control, calls,
+**Out of scope after Phase 7:** Android app control, Android power control,
 messaging, notifications, contacts, files, screen capture, microphone, camera,
 location and any form of Android shell or ADB execution. None is implemented,
 reachable through a tool, or expressible in the protocol.
+
+
+---
+
+## Phase 7 — Android Calls
+
+Phase 7 adds a deliberately small, explicit call-management surface over the
+existing authenticated Android Device Bridge. It does **not** create another
+bridge, transport, permission subsystem, or confirmation subsystem.
+
+```
+JARVIS / LiveKit FunctionTool
+    |
+DeviceActionManager        validation, permission, confirmation, redacted audit
+    |
+AndroidCallControl         device / connection / capability / state gates
+    |
+AndroidDeviceBridge        Ed25519, session, request id, nonce, sequence, replay guard
+    |
+explicit Phase 7 frame  --> future Android companion (AndroidCallController)
+```
+
+### Supported tools
+
+| LiveKit tool | Registered device tool | Risk | Permission | Arguments |
+| --- | --- | --- | --- | --- |
+| `android_call_status` | `android.call.status` | `SAFE` | `device.android.call.read` | `device` |
+| `android_call_dial` | `android.call.dial` | `EXTERNAL_ACTION` | `device.android.call.control` | `device`, `phone_number` |
+| `android_call_answer` | `android.call.answer` | `EXTERNAL_ACTION` | `device.android.call.control` | `device` |
+| `android_call_reject` | `android.call.reject` | `EXTERNAL_ACTION` | `device.android.call.control` | `device` |
+| `android_call_end` | `android.call.end` | `EXTERNAL_ACTION` | `device.android.call.control` | `device` |
+
+All target arguments are a registered bridge identity only: `adev-` followed by
+32 lower-case hex characters. There is no IP address, hostname, MAC address,
+port, URL, socket, transport, contact, caller-history, call/session identifier,
+or Android method parameter. A call operation never falls back to a different
+device.
+
+`status` reports only current structured state: `idle`, `ringing`, `dialing`,
+`active`, `ending`, `failed`, or `unavailable`; optional direction is only
+`incoming`, `outgoing`, or `unknown`. It does not expose call content, audio,
+recording, contact data, or history.
+
+`answer` and `reject` are accepted only by the companion for its currently
+ringing incoming call. `end` is accepted only for its current active call. An
+idle `end` yields `android_call_no_active_call` and **does not report success**.
+
+### Phone-number validation and privacy
+
+`android_call_dial` accepts only an international E.164 destination:
+
+* a leading `+` is mandatory;
+* exactly 7–15 ASCII decimal digits remain after normalization, and the first
+  digit cannot be zero;
+* only spaces, ASCII hyphens, and parentheses are removable presentation
+  formatting;
+* maximum raw input length is 64 characters.
+
+URI schemes (`tel:`/`sip:`), local or ambiguous numbers, extensions, DTMF
+characters, URLs, IP addresses, hostnames, control characters, non-ASCII
+numerals, shell-like text, desktop/ADB-like text, and overlong input are
+rejected. Normalization removes only allowed presentation formatting and never
+changes destination digits.
+
+The full canonical number is sent only in the dedicated signed dial frame and
+shown in the explicit human confirmation target. Normal tool results do not
+repeat it; fake-controller records use a redacted suffix; audit events log only
+argument names and never number values. Invalid-number errors do not echo the
+submitted value.
+
+### Confirmation policy
+
+Dial is both `EXTERNAL_ACTION` **and `confirmation_mandatory`**. It cannot be
+opted out by an operator `never_confirm` list and no model-facing tool accepts a
+`confirm=False`/skip flag. Before a dial frame can be sent, the flow is:
+
+```
+request -> pending confirmation (device + canonical number + “Place call”) ->
+explicit approved=True -> one execution
+```
+
+The pending request stores the normalized tool, device id, canonical number,
+operation, and expiration under the existing confirmation manager. It is
+single-use. Reusing it, changing the number/device/tool, allowing it to expire,
+or declining it prevents execution. The generic `device_confirmation` wrapper
+now requires an explicit boolean `approved` argument: a confirmation ID alone
+cannot approve or execute anything.
+
+Answer, reject, and end are explicit external actions covered by the existing
+confirmation policy; deployments may configure that policy for them. They expose
+no caller or arbitrary call selector.
+
+### Call state and capability gates
+
+`AndroidCallState` and `CallStateMachine` allow only reviewable transitions,
+including `IDLE -> DIALING -> ACTIVE`, `DIALING -> FAILED`,
+`RINGING -> ACTIVE`, `RINGING -> IDLE`, `ACTIVE -> ENDING -> IDLE`, and
+explicit unavailable recovery. A peer-reported impossible transition is refused.
+Model input never selects a state or transition.
+
+Each operation first verifies, in order:
+
+1. trusted, paired, non-revoked `adev-...` identity;
+2. connected, non-stale bridge session (heartbeats alone may recover a stale
+   session; state-changing calls cannot use it);
+3. advertised capability for the specific operation;
+4. authenticated dedicated request/response exchange.
+
+Capabilities are operation-specific: `call.status`, `call.dial`, `call.answer`,
+`call.reject`, and `call.end`. Advertisement means only that the phone claims
+support; a signed, validated response determines the outcome. Errors distinguish
+unsupported, unavailable, permission denied, invalid state/argument, timeout,
+and failed outcomes.
+
+### Protocol and authentication
+
+Protocol version 1 now includes exactly five allowlisted pairs:
+
+* `call_status` / `call_status_response`
+* `call_dial` / `call_dial_response`
+* `call_answer` / `call_answer_response`
+* `call_reject` / `call_reject_response`
+* `call_end` / `call_end_response`
+
+The dial payload is only `{"phone_number": "<canonical E.164>"}`; device,
+request ID, session ID, sequence, timestamp, nonce, and signature remain the
+existing authenticated frame fields. Call response envelopes are strict: unknown
+fields, unknown status/direction/error values, inconsistent state data, forged
+responses, wrong device/session, replays, malformed JSON, and oversized frames
+are refused. There is no generic command, raw telephony, arbitrary method, or
+arbitrary destination message type.
+
+Every operation has a bounded bridge timeout. Dial, answer, reject, and end are
+never automatically retried after an unanswered request, because success is then
+uncertain and a retry could duplicate or change a call.
+
+### Companion abstraction and fake testing
+
+`AndroidCallController` is the injectable five-method contract for a future
+Android companion: `get_status`, `dial`, `answer`, `reject`, and `end`. This
+repository does not implement Android telephony. The deterministic
+`FakeAndroidCallController` and `CallCapablePhone` test peer use the real Phase 7
+protocol over the in-memory Phase 5 transport and independently enforce trusted
+host signature, session, monotonic sequence, capability, and state checks.
+
+The fake tests cover status; dial-to-dialing-to-active; incoming answer/reject;
+active end; idle end; device/companion failures; timeout with no retry;
+unknown/unpaired/revoked/disconnected/stale device gates; capabilities; forged
+and replayed frames; wrong session/device; malformed and oversized frames;
+phone-number injection cases; confirmation pending/approval/rejection/expiry/
+reuse/migration; audit redaction; and LiveKit FunctionTool metadata/invocation.
+
+**FAKE / IN-MEMORY TESTING: performed.**
+
+**REAL ANDROID TESTING: NOT PERFORMED.** No physical Android phone, companion
+application, Android permission prompt, cellular carrier, or production
+transport was available. The fake companion is test infrastructure only and must
+not be represented as a real phone.
+
+### Security hardening discovered during integration
+
+* The generic confirmation gate previously checked a confirmation's tool name,
+  but did not compare stored validated arguments with a manually supplied
+  confirmation request. It now canonicalizes before confirmation and rejects a
+  mismatched argument mapping. This prevents any confirmed operation — including
+  a dial — from migrating to another device or destination.
+* The new stale-session action gate initially also blocked the read-only
+  heartbeat that is required to prove recovery. Heartbeats now use the existing
+  authenticated internal request primitive after checking paired + connected,
+  while all state-changing operations remain blocked until heartbeat health is
+  restored.
+
+### Deliberately absent
+
+No call interception, recording, spying, hidden monitoring, microphone access,
+call-content access, contact scraping, SMS/messaging, background/silent dialing,
+permission bypass, Android confirmation bypass, ADB, shell/process invocation,
+arbitrary network destination, desktop telephony fallback, arbitrary Android API
+method, or toggle/retry operation exists.
+
+### Verification
+
+No repository dependency changed; `cryptography` and `livekit-agents` were
+already declared in `requirements.txt`. The test environment installed those
+existing requirements in an ignored local virtual environment for verification.
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t . -q  # 865 tests, 3 skipped
+.venv/bin/python -m pytest tests -q                     # 862 passed, 3 skipped
+.venv/bin/python -m compileall -q .                     # clean
+```
+
+The real LiveKit harness imports `livekit.agents.FunctionTool`, verifies all five
+Phase 7 wrappers are genuine FunctionTool objects with exact signatures and
+metadata, and invokes the real dial wrapper to prove it produces a pending
+explicit confirmation before any registered action runs.

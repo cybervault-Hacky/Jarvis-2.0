@@ -49,6 +49,14 @@ from Jarvis_device_control import (
     android_bluetooth_enable,
     android_bluetooth_disable,
 )
+# Phase 7: Android Calls. These remain registered device tools over the authenticated Phase 5 bridge.
+from Jarvis_device_control import (
+    android_call_status,
+    android_call_dial,
+    android_call_answer,
+    android_call_reject,
+    android_call_end,
+)
 load_dotenv()
 
 
@@ -115,7 +123,12 @@ class Assistant(Agent):
                             android_wifi_disable, #ये Android phone का Wi-Fi radio off करता है - confirmation मांगता है (Phase 6)
                             android_bluetooth_status, #ये Android phone का Bluetooth radio state बताता है (Phase 6)
                             android_bluetooth_enable, #ये Android phone का Bluetooth radio on करता है - confirmation मांगता है, कोई pairing नहीं (Phase 6)
-                            android_bluetooth_disable #ये Android phone का Bluetooth radio off करता है - confirmation मांगता है (Phase 6)
+                            android_bluetooth_disable, #ये Android phone का Bluetooth radio off करता है - confirmation मांगता है (Phase 6)
+                            android_call_status, #ये trusted Android phone की current call state बताता है (Phase 7)
+                            android_call_dial, #ये normalized number पर call request करता है - explicit confirmation हमेशा ज़रूरी है (Phase 7)
+                            android_call_answer, #ये सिर्फ current incoming call answer करता है - confirmation policy लागू है (Phase 7)
+                            android_call_reject, #ये सिर्फ current incoming call reject करता है - confirmation policy लागू है (Phase 7)
+                            android_call_end #ये सिर्फ current active call end करता है - confirmation policy लागू है (Phase 7)
                          ]
                          )
 

@@ -31,6 +31,7 @@ from jarvis_devices.pc_system import PC_SYSTEM_TOOL_NAMES
 from jarvis_devices.pc_power import PC_POWER_TOOL_NAMES
 from jarvis_devices.android_tools import ANDROID_BRIDGE_TOOL_NAMES
 from jarvis_devices.android_system_tools import ANDROID_SYSTEM_TOOL_NAMES
+from jarvis_devices.android_call_tools import ANDROID_CALL_TOOL_NAMES
 
 try:  # imported as part of the ``tests`` package (pytest / discover -t .)
     from .pc_support import FakePCBackend
@@ -157,8 +158,8 @@ class ArbitraryExecutionTests(unittest.TestCase):
         # Closed world: only the explicitly registered tools exist. Phase 3
         # added the thirteen pc.system.* tools, Phase 4 the five pc.power.* tools,
         # Phase 5 the six android.device/bridge tools and Phase 6 the thirteen
-        # android.system.* tools to this allow-list - anything else must be
-        # refused.
+        # android.system.* tools and Phase 7 the five android.call.* tools to
+        # this allow-list - anything else must be refused.
         self.assertEqual(
             set(bridge.device_registry.names()),
             set(PC_APPLICATION_TOOL_NAMES)
@@ -166,6 +167,7 @@ class ArbitraryExecutionTests(unittest.TestCase):
             | set(PC_POWER_TOOL_NAMES)
             | set(ANDROID_BRIDGE_TOOL_NAMES)
             | set(ANDROID_SYSTEM_TOOL_NAMES)
+            | set(ANDROID_CALL_TOOL_NAMES)
             | {"jarvis.framework.diagnostics"},
         )
         for tool in bridge.device_registry.list_tools():

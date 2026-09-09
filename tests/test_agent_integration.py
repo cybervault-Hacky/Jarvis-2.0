@@ -91,6 +91,12 @@ NEW_TOOLS = [
     "android_bluetooth_status",
     "android_bluetooth_enable",
     "android_bluetooth_disable",
+    # Phase 7 - Android calls
+    "android_call_status",
+    "android_call_dial",
+    "android_call_answer",
+    "android_call_reject",
+    "android_call_end",
 ]
 
 EXISTING_MODULES = [

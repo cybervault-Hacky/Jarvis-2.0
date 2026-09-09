@@ -48,6 +48,8 @@ __all__ = [
     "PERMISSION_ANDROID_BRIDGE_MANAGE",
     "PERMISSION_ANDROID_SYSTEM_READ",
     "PERMISSION_ANDROID_SYSTEM_CONTROL",
+    "PERMISSION_ANDROID_CALL_READ",
+    "PERMISSION_ANDROID_CALL_CONTROL",
     "READ_ONLY_PERMISSIONS",
 ]
 
@@ -83,6 +85,10 @@ PERMISSION_ANDROID_BRIDGE_MANAGE = "device.android.bridge.manage"
 PERMISSION_ANDROID_SYSTEM_READ = "device.android.system.read"
 #: Phase 6 - change Android system state (volume, mute, brightness, radios).
 PERMISSION_ANDROID_SYSTEM_CONTROL = "device.android.system.control"
+#: Phase 7 - read only current call state. This does not grant call control.
+PERMISSION_ANDROID_CALL_READ = "device.android.call.read"
+#: Phase 7 - place, answer, reject or end calls on a trusted Android device.
+PERMISSION_ANDROID_CALL_CONTROL = "device.android.call.control"
 
 #: The only permissions granted by :meth:`PermissionPolicy.with_local_defaults`.
 READ_ONLY_PERMISSIONS: FrozenSet[str] = frozenset({PERMISSION_DEVICE_STATUS_READ})

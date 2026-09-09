@@ -137,6 +137,7 @@ class ToolResult:
         message: str,
         *,
         error: Optional[str] = None,
+        error_code: str = ErrorCode.INVALID_ARGUMENT,
         tool_name: str = "",
         execution_id: str = "",
     ) -> "ToolResult":
@@ -147,7 +148,7 @@ class ToolResult:
             tool_name=tool_name,
             execution_id=execution_id,
             error=error,
-            error_code=ErrorCode.INVALID_ARGUMENT,
+            error_code=error_code,
         )
 
     @classmethod

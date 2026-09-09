@@ -100,6 +100,7 @@ __all__ = [
     "AndroidConnectionError",
     "AndroidConnectionTimeoutError",
     "AndroidDeviceNotConnectedError",
+    "AndroidDeviceStaleError",
     "AndroidCapabilityUnavailableError",
     "PairingStatus",
     "PendingPairing",
@@ -210,6 +211,12 @@ class AndroidDeviceNotConnectedError(AndroidConnectionError):
     """
 
     error_code = ErrorCode.ANDROID_DEVICE_NOT_CONNECTED
+
+
+class AndroidDeviceStaleError(AndroidConnectionError):
+    """The connection exists but heartbeat health is too old to act safely."""
+
+    error_code = ErrorCode.ANDROID_DEVICE_STALE
 
 
 class AndroidCapabilityUnavailableError(AndroidBridgeError):
@@ -992,9 +999,18 @@ class AndroidDeviceBridge:
         """Ask the device whether it is alive. Never fakes a healthy answer."""
         self.require_available()
         device = self._require_privileged(device_id)
+        if device.connection.state is not ConnectionState.CONNECTED:
+            raise AndroidDeviceNotConnectedError(
+                f"Device {device.display_name} is not connected "
+                f"(state: {device.connection.state.value})."
+            )
         self._counters["heartbeats"] += 1
-        response = await self.send_request(
-            device_id, MessageType.HEARTBEAT, {"ping": True}, expect=MessageType.HEARTBEAT_ACK
+        # Heartbeats are the single deliberate exception to the stale-action
+        # gate: they are read-only liveness probes and are how a stale session
+        # proves it has recovered. All state-changing operations still use
+        # require_connected() and are refused while stale.
+        response = await self._request(
+            device, MessageType.HEARTBEAT, {"ping": True}, expect=MessageType.HEARTBEAT_ACK
         )
         if response is None:
             self._heartbeat_failures[device_id] = self.clock()
@@ -1150,6 +1166,10 @@ class AndroidDeviceBridge:
             raise AndroidDeviceNotConnectedError(
                 f"Device {device.display_name} is not connected "
                 f"(state: {device.connection.state.value})."
+            )
+        if self.health(device.device_id) is HealthState.STALE:
+            raise AndroidDeviceStaleError(
+                f"Device {device.display_name} has a stale bridge session."
             )
         return device
 
